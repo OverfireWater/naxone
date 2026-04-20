@@ -50,6 +50,11 @@ pub struct GeneralConfig {
     /// Default (None) resolves to %APPDATA%/RustStudy/Packages/.
     #[serde(default)]
     pub package_install_root: Option<PathBuf>,
+    /// CLI 层全局 PHP 版本。None 表示未设置；设置后在
+    /// %USERPROFILE%\.ruststudy\bin\php.cmd 里把 php 命令指向这个版本。
+    /// 不影响 vhost 绑定的 PHP 版本，只影响用户命令行里敲 `php -v`。
+    #[serde(default)]
+    pub global_php_version: Option<String>,
 }
 
 fn default_auto_start() -> Vec<String> {
@@ -169,6 +174,7 @@ impl AppConfig {
                 log_retention_days: 7,
                 extra_install_paths: Vec::new(),
                 package_install_root: None,
+                global_php_version: None,
             },
             web_server: WebServerConfig::default(),
             mysql: MysqlConfig::default(),

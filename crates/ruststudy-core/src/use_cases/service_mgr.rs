@@ -60,6 +60,8 @@ impl ServiceManager {
         all_services: &mut [ServiceInstance],
     ) -> Result<()> {
         let is_web_server = matches!(target.kind, ServiceKind::Nginx | ServiceKind::Apache);
+        // 非 PHP 类服务（web + db + cache）必须是单实例：端口只有一份
+        let needs_single_instance = target.kind != ServiceKind::Php;
 
         if is_web_server {
             // Mutual exclusion: stop the other web server if running (both use port 80).
@@ -87,6 +89,34 @@ impl ServiceManager {
                             "{} 停止后仍在运行（可能是以管理员身份启动的外部进程），已中止启动 {}",
                             rival_kind.display_name(),
                             target.kind.display_name()
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 同 kind 多版本互斥：启动目标版本前，停止同 kind 其他版本（端口只有一份）
+        if needs_single_instance {
+            let target_id = target.id();
+            for svc in all_services.iter_mut() {
+                if svc.kind == target.kind && svc.id() != target_id && svc.status.is_running() {
+                    if let Err(e) = self.stop_service(svc).await {
+                        return Err(RustStudyError::Process(format!(
+                            "无法停止同类旧版本 {} {}：{}",
+                            svc.kind.display_name(),
+                            svc.version,
+                            e
+                        )));
+                    }
+                    if let Ok(status) = self.process_mgr.status(svc).await {
+                        svc.status = status.clone();
+                    }
+                    if svc.status.is_running() {
+                        return Err(RustStudyError::Process(format!(
+                            "{} {} 停止后仍在运行，已中止启动 {}",
+                            svc.kind.display_name(),
+                            svc.version,
+                            target.version
                         )));
                     }
                 }

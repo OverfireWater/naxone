@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { CheckCircle2, Download, AlertCircle, Trash2 } from "lucide-vue-next";
 
 interface PackageVersion {
@@ -56,6 +57,30 @@ const isBusy = computed(() => phase.value === "starting" || phase.value === "dow
 async function doInstall() {
   if (isBusy.value) return;
   if (isSelectedInstalled.value) return;
+
+  // Nginx/Apache 商店侧限装 1 个：发现已有其他商店版本 → 确认后先卸再装
+  // installedVersions 包含所有来源（含 PHPStudy），但 uninstall_package 后端会拒绝
+  // 非 Store 源，所以不会误删 PHPStudy 的；这里我们只为不同版本走替换流程
+  const singleOnly = props.pkg.name === "nginx" || props.pkg.name === "apache";
+  if (singleOnly) {
+    const other = props.installedVersions.find(v => v !== selectedVersion.value);
+    if (other) {
+      const ok = await confirm(
+        `${props.pkg.display_name} 限装一个版本，当前已安装 v${other}，安装 v${selectedVersion.value} 会先卸载它。确定吗？`,
+        { title: "替换已有版本", kind: "warning" }
+      );
+      if (!ok) return;
+      try {
+        await invoke("uninstall_package", { name: props.pkg.name, version: other });
+      } catch (e) {
+        // 卸载失败（比如那个版本是 PHPStudy 的 → 后端返回"不能卸载 PHPStudy 自带"）
+        phase.value = "failed";
+        errorMsg.value = `无法替换已有版本：${e}`;
+        return;
+      }
+    }
+  }
+
   phase.value = "starting";
   progress.value = 0;
   downloadedMB.value = null;

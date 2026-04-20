@@ -468,12 +468,22 @@ pub async fn uninstall_package(
         _ => return Err(format!("未知软件类型: {}", name)),
     };
 
-    // Refuse if the service is running
+    // Origin 校验 + 运行检查（一次读锁搞定）
     {
+        use ruststudy_core::domain::service::ServiceOrigin;
         let services = state.services.read().await;
-        let running = services
+        let matches: Vec<_> = services
             .iter()
-            .any(|s| s.kind == target_kind && s.version == version && s.status.is_running());
+            .filter(|s| s.kind == target_kind && s.version == version)
+            .collect();
+        // 若该版本只存在 PhpStudy 源（没有商店源副本），明确拒绝
+        // 仅靠下面的 packages_root 路径边界也能挡住，但先给用户友好提示
+        if !matches.is_empty() && matches.iter().all(|s| s.origin == ServiceOrigin::PhpStudy) {
+            let msg = "不能卸载 PHPStudy 自带的软件".to_string();
+            push_log(&state, LogLevel::Warn, "store", msg.clone(), None, None).await;
+            return Err(msg);
+        }
+        let running = matches.iter().any(|s| s.status.is_running());
         if running {
             let msg = format!("{} v{} 正在运行，请先停止后再卸载", pkg.display_name, version);
             push_log(&state, LogLevel::Warn, "store", msg.clone(), None, None).await;

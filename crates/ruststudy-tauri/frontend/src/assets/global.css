@@ -88,6 +88,8 @@
   .btn-success { background: var(--color-success); }
   .btn-danger { background: var(--color-danger); }
   .btn-danger:hover { background: var(--color-danger-hover); }
+  .btn-primary { background: var(--color-blue); color: white; }
+  .btn-primary:hover { background: var(--color-blue-light); }
   .btn-secondary { background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary); }
   .btn-secondary:hover { background: var(--color-gray-light); color: var(--text-primary); }
   .btn-sm { padding: 4px 12px; font-size: 12px; }
