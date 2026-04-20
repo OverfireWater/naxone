@@ -1,0 +1,23 @@
+[package]
+name = "ruststudy-adapters"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ruststudy-core = { path = "../ruststudy-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+# Software store: download + unzip
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "gzip", "json"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+futures-util = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+# 读取 HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
+# 以自动发现 Clash/V2ray 等"系统代理"开关的代理地址
+winreg = "0.52"

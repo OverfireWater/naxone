@@ -1,0 +1,41 @@
+# Rust
+/target/
+**/target/
+*.pdb
+
+# Frontend
+**/node_modules/
+**/dist/
+
+# Tauri
+/src-tauri/target/
+/src-tauri/gen/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs / runtime
+*.log
+*.log.*
+logs/
+
+# 临时 / 工作区
+.scratch/
+.claude/
+.loop/
+
+# Secrets
+*.env
+*.env.local
+.env
+
+# Tauri 构建产物会放在 target/ 下，上面已忽略。
+# 但独立的 bundle 目录也防一手：
+/bundle/
+/AppImage/

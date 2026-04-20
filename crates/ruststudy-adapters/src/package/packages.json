@@ -1,0 +1,235 @@
+{
+  "packages": [
+    {
+      "name": "nginx",
+      "display_name": "Nginx",
+      "category": "web",
+      "brand_color": "#009639",
+      "brand_letter": "N",
+      "homepage": "https://nginx.org/",
+      "description": "高性能 HTTP 与反向代理服务器",
+      "versions": [
+        {
+          "version": "1.27.3",
+          "url": "https://nginx.org/download/nginx-1.27.3.zip",
+          "sha256": null,
+          "size_mb": 2,
+          "exe_rel": "nginx.exe",
+          "variant": "mainline"
+        },
+        {
+          "version": "1.26.2",
+          "url": "https://nginx.org/download/nginx-1.26.2.zip",
+          "sha256": null,
+          "size_mb": 2,
+          "exe_rel": "nginx.exe",
+          "variant": "stable"
+        },
+        {
+          "version": "1.25.3",
+          "url": "https://nginx.org/download/nginx-1.25.3.zip",
+          "sha256": null,
+          "size_mb": 2,
+          "exe_rel": "nginx.exe",
+          "variant": null
+        },
+        {
+          "version": "1.24.0",
+          "url": "https://nginx.org/download/nginx-1.24.0.zip",
+          "sha256": null,
+          "size_mb": 2,
+          "exe_rel": "nginx.exe",
+          "variant": null
+        }
+      ]
+    },
+    {
+      "name": "apache",
+      "display_name": "Apache HTTPD",
+      "category": "web",
+      "brand_color": "#d22128",
+      "brand_letter": "A",
+      "homepage": "https://www.apachelounge.com/",
+      "description": "由 Apache Lounge 提供的 Windows VS17 build",
+      "versions": [
+        {
+          "version": "2.4.63",
+          "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.63-250207-win64-VS17.zip",
+          "sha256": null,
+          "size_mb": 13,
+          "exe_rel": "bin/httpd.exe",
+          "variant": null
+        },
+        {
+          "version": "2.4.62",
+          "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-240904-win64-VS17.zip",
+          "sha256": null,
+          "size_mb": 13,
+          "exe_rel": "bin/httpd.exe",
+          "variant": null
+        },
+        {
+          "version": "2.4.58",
+          "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.58-240404-win64-VS17.zip",
+          "sha256": null,
+          "size_mb": 13,
+          "exe_rel": "bin/httpd.exe",
+          "variant": null
+        }
+      ]
+    },
+    {
+      "name": "mysql",
+      "display_name": "MySQL",
+      "category": "db",
+      "brand_color": "#4479a1",
+      "brand_letter": "M",
+      "homepage": "https://dev.mysql.com/",
+      "description": "官方关系型数据库",
+      "versions": [
+        {
+          "version": "8.0.40",
+          "url": "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip",
+          "sha256": null,
+          "size_mb": 225,
+          "exe_rel": "bin/mysqld.exe",
+          "variant": null
+        },
+        {
+          "version": "8.0.36",
+          "url": "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.36-winx64.zip",
+          "sha256": null,
+          "size_mb": 225,
+          "exe_rel": "bin/mysqld.exe",
+          "variant": null
+        },
+        {
+          "version": "5.7.44",
+          "url": "https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.44-winx64.zip",
+          "sha256": null,
+          "size_mb": 370,
+          "exe_rel": "bin/mysqld.exe",
+          "variant": "最后版"
+        }
+      ]
+    },
+    {
+      "name": "php",
+      "display_name": "PHP",
+      "category": "php",
+      "brand_color": "#777bb4",
+      "brand_letter": "P",
+      "homepage": "https://windows.php.net/",
+      "description": "Windows x64 NTS 版，配合 FastCGI 使用",
+      "versions": [
+        {
+          "version": "8.4.2",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.4.2-nts-Win32-vs17-x64.zip",
+          "sha256": null,
+          "size_mb": 30,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.4.1",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.4.1-nts-Win32-vs17-x64.zip",
+          "sha256": null,
+          "size_mb": 30,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.3.14",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.3.14-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 28,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.3.2",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.3.2-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 27,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.2.26",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.2.26-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 27,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.2.15",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.2.15-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 26,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.1.31",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.1.31-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 26,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.1.27",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.1.27-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 25,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS"
+        },
+        {
+          "version": "8.0.30",
+          "url": "https://windows.php.net/downloads/releases/archives/php-8.0.30-nts-Win32-vs16-x64.zip",
+          "sha256": null,
+          "size_mb": 25,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS · EOL"
+        },
+        {
+          "version": "7.4.33",
+          "url": "https://windows.php.net/downloads/releases/archives/php-7.4.33-nts-Win32-vc15-x64.zip",
+          "sha256": null,
+          "size_mb": 24,
+          "exe_rel": "php-cgi.exe",
+          "variant": "x64-NTS · EOL"
+        }
+      ]
+    },
+    {
+      "name": "redis",
+      "display_name": "Redis",
+      "category": "cache",
+      "brand_color": "#dc382d",
+      "brand_letter": "R",
+      "homepage": "https://github.com/tporadowski/redis",
+      "description": "Windows 版由社区 tporadowski 维护，官方不发 Windows 二进制，最高到 5.x",
+      "versions": [
+        {
+          "version": "5.0.14.1",
+          "url": "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip",
+          "sha256": null,
+          "size_mb": 7,
+          "exe_rel": "redis-server.exe",
+          "variant": "社区最后版"
+        },
+        {
+          "version": "3.0.504",
+          "url": "https://github.com/microsoftarchive/redis/releases/download/win-3.0.504/Redis-x64-3.0.504.zip",
+          "sha256": null,
+          "size_mb": 5,
+          "exe_rel": "redis-server.exe",
+          "variant": "MS Archive"
+        }
+      ]
+    }
+  ]
+}
