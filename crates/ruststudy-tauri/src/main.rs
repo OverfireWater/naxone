@@ -68,6 +68,7 @@ fn main() {
             commands::utils::read_log_tail,
             commands::utils::find_and_read_log,
             commands::utils::get_startup_errors,
+            commands::updater::check_for_updates,
             commands::logger::get_logs,
             commands::logger::clear_logs,
             commands::logger::get_log_stats,

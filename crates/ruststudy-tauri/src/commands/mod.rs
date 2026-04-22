@@ -4,5 +4,6 @@ pub mod php;
 pub mod service;
 pub mod service_config;
 pub mod settings;
+pub mod updater;
 pub mod utils;
 pub mod vhost;

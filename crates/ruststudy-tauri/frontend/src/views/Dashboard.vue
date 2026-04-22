@@ -29,6 +29,11 @@ const selectedByKind = ref<Record<string, string>>({});
 interface AppStats { pid: number; memory_mb: number | null; uptime_secs: number; }
 const appStats = ref<AppStats | null>(null);
 
+// 在线更新检查
+interface UpdateInfo { available: boolean; latest_version: string; current_version: string; release_url: string; release_notes: string; download_url: string | null; }
+const updateInfo = ref<UpdateInfo | null>(null);
+const updateDismissed = ref(false);
+
 // 格式化运行时长："2h 13m" / "45m 30s" / "1d 2h"
 function fmtUptime(s: number): string {
   if (s < 60) return `${s}s`;
@@ -166,6 +171,16 @@ async function loadRecentLogs() {
 async function loadAppStats() {
   try { appStats.value = await invoke<AppStats>("get_app_stats"); }
   catch {}
+}
+
+async function checkForUpdates() {
+  try { updateInfo.value = await invoke<UpdateInfo>("check_for_updates"); }
+  catch { /* 静默：网络失败不影响使用 */ }
+}
+
+function openUpdatePage() {
+  const url = updateInfo.value?.download_url || updateInfo.value?.release_url;
+  if (url) invoke("open_in_browser", { url });
 }
 
 async function checkStartupErrors() {
@@ -325,6 +340,7 @@ onMounted(async () => {
   loadRecentLogs();
   loadGlobalPhp();
   loadAppStats();
+  checkForUpdates();
   // 后端在装/卸 / rescan 完成后推 services-changed 事件 → 立即刷新，不等轮询
   unlistenServicesChanged = await listen("services-changed", () => {
     loadServices(true);
@@ -353,6 +369,15 @@ onUnmounted(() => {
       <div class="flex gap-2">
         <button class="btn btn-success btn-sm" :disabled="batchBusy" @click="startAll">{{ batchBusy ? "启动中..." : "全部启动" }}</button>
         <button class="btn btn-danger btn-sm" :disabled="batchBusy" @click="stopAll">{{ batchBusy ? "停止中..." : "全部停止" }}</button>
+      </div>
+    </div>
+
+    <!-- 更新通知横条 -->
+    <div v-if="updateInfo?.available && !updateDismissed" class="update-banner mb-3">
+      <span class="text-[13px]">新版本 <b>v{{ updateInfo.latest_version }}</b> 可用（当前 v{{ updateInfo.current_version }}）</span>
+      <div class="flex gap-1.5 ml-auto">
+        <button class="btn btn-primary btn-sm" @click="openUpdatePage">立即下载</button>
+        <button class="btn btn-secondary btn-sm" @click="updateDismissed = true">稍后</button>
       </div>
     </div>
 
@@ -627,6 +652,17 @@ onUnmounted(() => {
 .version-sel:hover { border-color: var(--text-muted); background: var(--bg-hover); }
 .version-sel:focus { border-color: var(--color-blue-light); }
 .version-sel option { background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; }
+
+/* 更新提醒横条 */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(99, 128, 255, 0.1);
+  border: 1px solid rgba(99, 128, 255, 0.35);
+}
 
 /* 系统 PATH 冲突警告条 */
 .conflict-banner {

@@ -15,6 +15,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.7.0"
 chrono = "0.4.44"
 futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -167,14 +167,18 @@ pub(crate) fn detect_real_php_version(php_install_dir: &Path) -> Option<String> 
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    let mut child = Command::new(&exe)
-        .arg("-n")
-        .arg("-v")
+    let mut cmd = Command::new(&exe);
+    cmd.arg("-n").arg("-v")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    // release 模式不弹 CMD 窗口
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let mut child = cmd.spawn().ok()?;
 
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut stdout_handle = child.stdout.take()?;

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.ruststudy.app",
   "build": {
-    "frontendDist": "../frontend/dist",
+    "frontendDist": "./frontend/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "cd ../frontend && npm run dev",
     "beforeBuildCommand": "cd ../frontend && npm run build"

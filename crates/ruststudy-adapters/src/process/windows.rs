@@ -5,6 +5,23 @@ use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock};
 
+/// Windows release 模式下，子进程不能弹 CMD 窗口。
+/// 给所有 Command::new() 加这个 creation flag。
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+trait NoWindow {
+    fn no_window(&mut self) -> &mut Self;
+}
+
+#[cfg(target_os = "windows")]
+impl NoWindow for Command {
+    fn no_window(&mut self) -> &mut Self {
+        self.creation_flags(CREATE_NO_WINDOW)
+    }
+}
+
 use ruststudy_core::domain::service::{ServiceInstance, ServiceKind, ServiceStatus};
 use ruststudy_core::error::{Result, RustStudyError};
 use ruststudy_core::ports::process::ProcessManager;
@@ -220,6 +237,7 @@ impl WindowsProcessManager {
 impl ProcessManager for WindowsProcessManager {
     async fn start(&self, instance: &ServiceInstance) -> Result<u32> {
         let mut cmd = Self::build_start_command(instance)?;
+        cmd.no_window();
 
         let mut child = cmd
             .stdin(std::process::Stdio::null())
@@ -282,6 +300,7 @@ impl ProcessManager for WindowsProcessManager {
     async fn stop(&self, instance: &ServiceInstance) -> Result<()> {
         // Try graceful stop command first (nginx -s quit, httpd -k stop, redis-cli shutdown)
         if let Some(mut cmd) = Self::build_stop_command(instance) {
+            cmd.no_window();
             let result = cmd
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -314,6 +333,7 @@ impl ProcessManager for WindowsProcessManager {
 
         if pid > 0 {
             let kill = Command::new("taskkill")
+                .no_window()
                 .args(["/F", "/PID", &pid.to_string()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::piped())
@@ -413,6 +433,7 @@ impl ProcessManager for WindowsProcessManager {
                 // First run -t to test config
                 let exe = instance.install_path.join("nginx.exe");
                 let test = Command::new(&exe)
+                    .no_window()
                     .arg("-t")
                     .current_dir(&instance.install_path)
                     .output()
@@ -426,6 +447,7 @@ impl ProcessManager for WindowsProcessManager {
                 }
                 // Then reload
                 let reload_out = Command::new(&exe)
+                    .no_window()
                     .arg("-s").arg("reload")
                     .current_dir(&instance.install_path)
                     .output()
@@ -439,6 +461,7 @@ impl ProcessManager for WindowsProcessManager {
             ServiceKind::Apache => {
                 let exe = instance.install_path.join("bin").join("httpd.exe");
                 let out = Command::new(&exe)
+                    .no_window()
                     .arg("-k").arg("graceful")
                     .current_dir(&instance.install_path)
                     .output()
@@ -475,6 +498,7 @@ async fn find_pid_by_port(port: u16) -> u32 {
 async fn netstat_snapshot() -> HashMap<u16, u32> {
     let mut map = HashMap::new();
     let output = Command::new("netstat")
+        .no_window()
         .args(["-ano", "-p", "TCP"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -506,6 +530,7 @@ async fn netstat_snapshot() -> HashMap<u16, u32> {
 pub async fn tasklist_memory_snapshot() -> HashMap<u32, u64> {
     let mut map = HashMap::new();
     let output = Command::new("tasklist")
+        .no_window()
         .args(["/FO", "CSV", "/NH"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -566,6 +591,7 @@ async fn get_process_name(pid: u32) -> Option<String> {
         return None;
     }
     let output = Command::new("tasklist")
+        .no_window()
         .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
