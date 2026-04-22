@@ -21,7 +21,7 @@ impl ServiceManager {
         }
         instance.status = ServiceStatus::Starting;
         let pid = self.process_mgr.start(instance).await?;
-        instance.status = ServiceStatus::Running { pid };
+        instance.status = ServiceStatus::Running { pid, memory_mb: None };
         Ok(())
     }
 

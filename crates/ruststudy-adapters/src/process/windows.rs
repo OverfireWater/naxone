@@ -24,6 +24,8 @@ pub struct WindowsProcessManager {
     status_cache: Arc<RwLock<HashMap<String, (Instant, ServiceStatus)>>>,
     /// 最近一次 netstat 结果（port → pid），短 TTL 合并同窗口重复调用
     netstat_cache: Arc<Mutex<Option<(Instant, HashMap<u16, u32>)>>>,
+    /// 最近一次 tasklist 结果（pid → memory_mb），给所有服务共享
+    tasklist_cache: Arc<Mutex<Option<(Instant, HashMap<u32, u64>)>>>,
 }
 
 impl WindowsProcessManager {
@@ -32,6 +34,7 @@ impl WindowsProcessManager {
             processes: Arc::new(RwLock::new(HashMap::new())),
             status_cache: Arc::new(RwLock::new(HashMap::new())),
             netstat_cache: Arc::new(Mutex::new(None)),
+            tasklist_cache: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -168,29 +171,48 @@ impl WindowsProcessManager {
             return ServiceStatus::Stopped;
         }
 
-        // 2) 优先信任自己启动的 PID
-        {
+        // 2) 决定 PID：优先自己启动的；否则从 netstat snapshot 反查
+        let pid = {
             let procs = self.processes.read().await;
-            if let Some(info) = procs.get(&instance.id()) {
-                return ServiceStatus::Running { pid: info.pid };
+            procs.get(&instance.id()).map(|info| info.pid)
+        };
+        let pid = match pid {
+            Some(p) => p,
+            None => {
+                let snapshot = self.snapshot_listening_ports().await;
+                let p = snapshot.get(&instance.port).copied().unwrap_or(0);
+                if p == 0 {
+                    return ServiceStatus::Stopped;
+                }
+                // Web 服务器共享 80 端口时需要按进程名校验；PHP 信任端口
+                if instance.kind != ServiceKind::Php
+                    && !pid_matches_service(p, instance.kind).await
+                {
+                    return ServiceStatus::Stopped;
+                }
+                p
+            }
+        };
+
+        // 3) 查内存（best-effort；失败就给 None，不影响状态）
+        let memory_mb = self.tasklist_memory_map().await.get(&pid).copied();
+        ServiceStatus::Running { pid, memory_mb }
+    }
+
+    /// 一次 `tasklist /FO CSV /NH` 把所有进程 PID → 内存（MB）抓全，短 TTL 缓存
+    pub async fn tasklist_memory_map(&self) -> HashMap<u32, u64> {
+        {
+            let guard = self.tasklist_cache.lock().await;
+            if let Some((ts, map)) = guard.as_ref() {
+                if ts.elapsed() < NETSTAT_SNAPSHOT_TTL {
+                    return map.clone();
+                }
             }
         }
-
-        // 3) 从 netstat snapshot 查 PID（比单个 netstat 快且复用）
-        let snapshot = self.snapshot_listening_ports().await;
-        let pid = snapshot.get(&instance.port).copied().unwrap_or(0);
-        if pid == 0 {
-            return ServiceStatus::Stopped;
-        }
-
-        // 4) PHP 信任端口；web 服务器需按进程名校验避开 nginx/apache 混淆
-        if instance.kind == ServiceKind::Php {
-            return ServiceStatus::Running { pid };
-        }
-        if pid_matches_service(pid, instance.kind).await {
-            return ServiceStatus::Running { pid };
-        }
-        ServiceStatus::Stopped
+        let map = tasklist_memory_snapshot().await;
+        let mut guard = self.tasklist_cache.lock().await;
+        *guard = Some((Instant::now(), map.clone()));
+        map
     }
 }
 
@@ -480,6 +502,64 @@ async fn netstat_snapshot() -> HashMap<u16, u32> {
     map
 }
 
+/// 一次 `tasklist /FO CSV /NH` 把所有进程的 PID → 工作集内存（MB）抓全
+pub async fn tasklist_memory_snapshot() -> HashMap<u32, u64> {
+    let mut map = HashMap::new();
+    let output = Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await;
+    let Ok(output) = output else { return map };
+    let text = String::from_utf8_lossy(&output.stdout);
+    // CSV 每行: "Image Name","PID","Session Name","Session#","Mem Usage"
+    // e.g.   "nginx.exe","1234","Console","1","12,345 K"
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let fields = parse_csv_line(line);
+        if fields.len() < 5 {
+            continue;
+        }
+        let Ok(pid) = fields[1].parse::<u32>() else { continue };
+        let mem = parse_tasklist_memory(&fields[4]);
+        if let Some(mb) = mem {
+            map.insert(pid, mb);
+        }
+    }
+    map
+}
+
+/// Parse `"12,345 K"` 或 `"1,234,567 K"` → MB（四舍五入到整数）
+fn parse_tasklist_memory(raw: &str) -> Option<u64> {
+    let trimmed = raw.trim().trim_end_matches('K').trim_end_matches(' ').trim();
+    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    let kb: u64 = digits.parse().ok()?;
+    // KB → MB，向上取整（0 内存的进程显示 0 MB）
+    Some((kb + 512) / 1024)
+}
+
+/// 简易 CSV 行 parser：处理 `"a","b"` 格式，字段里不含逗号的情况
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for c in line.chars() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                fields.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    fields.push(current);
+    fields
+}
+
 /// Get the executable name of a process by PID using `tasklist`
 async fn get_process_name(pid: u32) -> Option<String> {
     if pid == 0 {
@@ -514,5 +594,30 @@ async fn pid_matches_service(pid: u32, kind: ServiceKind) -> bool {
         ServiceKind::Php => name.contains("php"),
         ServiceKind::Mysql => name.contains("mysqld"),
         ServiceKind::Redis => name.contains("redis"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tasklist_memory_variants() {
+        assert_eq!(parse_tasklist_memory("12,345 K"), Some(12)); // 12345 KB → 12 MB
+        assert_eq!(parse_tasklist_memory("1,234,567 K"), Some(1206)); // 1.2 GB
+        assert_eq!(parse_tasklist_memory("512 K"), Some(1)); // <1MB 向上凑整
+        assert_eq!(parse_tasklist_memory("0 K"), Some(0));
+        assert_eq!(parse_tasklist_memory("N/A"), None);
+        assert_eq!(parse_tasklist_memory(""), None);
+    }
+
+    #[test]
+    fn parse_csv_line_handles_quotes() {
+        let line = r#""nginx.exe","1234","Console","1","12,345 K""#;
+        let fields = parse_csv_line(line);
+        assert_eq!(fields.len(), 5);
+        assert_eq!(fields[0], "nginx.exe");
+        assert_eq!(fields[1], "1234");
+        assert_eq!(fields[4], "12,345 K");
     }
 }

@@ -16,6 +16,8 @@ impl PhpStudyScanner {
         }
 
         // Scan for PHP versions: Extensions/php/php85nts/, php74nts/, etc.
+        // 优先从 `php.exe -n -v` 读真实版本，不要只信文件夹名
+        // （PHPStudy 的 php84nts 实际可能装 8.4.12，php85nts 可能装 8.5.1）
         let php_dir = extensions_path.join("php");
         if php_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&php_dir) {
@@ -24,11 +26,14 @@ impl PhpStudyScanner {
                     let path = entry.path();
                     if path.is_dir() && path.join("php-cgi.exe").exists() {
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            let (version, variant) = parse_php_dir_name(name);
+                            let (folder_version, variant) = parse_php_dir_name(name);
+                            // 跑 php.exe -n -v 读真实版本；失败就退化为文件夹名
+                            let real_version = detect_real_php_version(&path)
+                                .unwrap_or(folder_version);
                             let config_path = resolve_config(&path, &["php.ini"]);
                             instances.push(ServiceInstance {
                                 kind: ServiceKind::Php,
-                                version,
+                                version: real_version,
                                 variant: Some(variant),
                                 install_path: path,
                                 config_path,
@@ -147,6 +152,64 @@ fn resolve_config(base: &Path, candidates: &[&str]) -> Option<std::path::PathBuf
     None
 }
 
+/// Spawn `php.exe -n -v` and parse the first line like "PHP 8.5.1 (cli) (...)".
+/// Returns the full dotted version ("8.5.1") when parseable, else None.
+///
+/// `-n` skips php.ini so we don't print extension warnings and we don't fail
+/// if ini is broken. Timeout is 3s; if php.exe hangs we bail out.
+pub(crate) fn detect_real_php_version(php_install_dir: &Path) -> Option<String> {
+    let exe = php_install_dir.join("php.exe");
+    if !exe.exists() {
+        return None;
+    }
+    // 3-second timeout via a background thread + Child::kill. std::process has no
+    // native timeout, so spawn + poll is the cleanest way without tokio here.
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let mut child = Command::new(&exe)
+        .arg("-n")
+        .arg("-v")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut stdout_handle = child.stdout.take()?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(40)),
+            Err(_) => return None,
+        }
+    }
+    // Child exited. Read stdout.
+    use std::io::Read;
+    let mut buf = String::new();
+    stdout_handle.read_to_string(&mut buf).ok()?;
+    parse_php_v_output(&buf)
+}
+
+/// 从 "PHP 8.5.1 (cli) ..." 抽出 "8.5.1"
+fn parse_php_v_output(output: &str) -> Option<String> {
+    let first_line = output.lines().next()?.trim();
+    let rest = first_line.strip_prefix("PHP ")?;
+    let ver: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    if ver.is_empty() || !ver.contains('.') {
+        return None;
+    }
+    Some(ver)
+}
+
 /// Parse PHP directory name like "php85nts" -> ("8.5", "nts")
 fn parse_php_dir_name(name: &str) -> (String, String) {
     let name = name.strip_prefix("php").unwrap_or(name);
@@ -199,5 +262,18 @@ mod tests {
             parse_php_dir_name("php84nts"),
             ("8.4".into(), "nts".into())
         );
+    }
+
+    #[test]
+    fn parse_php_v_output_extracts_dotted_version() {
+        let full = "PHP 8.5.1 (cli) (built: Dec 16 2025 16:25:55) (NTS Visual C++ 2022 x64)\nCopyright (c) The PHP Group\n";
+        assert_eq!(parse_php_v_output(full), Some("8.5.1".into()));
+        let full2 = "PHP 7.4.33 (cli) (built: Nov 16 2022 ...)";
+        assert_eq!(parse_php_v_output(full2), Some("7.4.33".into()));
+        // 异常输入
+        assert_eq!(parse_php_v_output(""), None);
+        assert_eq!(parse_php_v_output("garbage"), None);
+        // 只有单段数字（无点）也拒绝
+        assert_eq!(parse_php_v_output("PHP 8 (cli)"), None);
     }
 }

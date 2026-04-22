@@ -28,6 +28,12 @@ async function loadConfig() { try { config.value = await invoke("get_config"); }
 async function saveSettings() {
   busy.value = true;
   try {
+    // WWW 根目录 UI 已移除，保存前从 phpstudy_path 推：默认 {phpstudy_path}\WWW
+    // 没 phpstudy_path 时保留现有值；现有值也没就留空（让后端容忍）
+    const ps = (config.value.phpstudy_path || "").replace(/\\/g, "/").replace(/\/+$/, "");
+    if (ps && !config.value.www_root) {
+      config.value.www_root = ps + "/WWW";
+    }
     await invoke("save_config", { dto: config.value });
     await invoke("rescan_services");
     saved.value = true; setTimeout(() => (saved.value = false), 2000);
@@ -82,11 +88,7 @@ onMounted(() => { loadConfig(); });
         <div class="flex flex-col gap-1.5">
           <label class="text-[13px] text-content-secondary font-medium">PHPStudy 安装路径</label>
           <input class="input" v-model="config.phpstudy_path" placeholder="D:\phpstudy_pro" />
-          <p class="text-xs text-content-muted mt-1">扫描此目录下的 Extensions 发现已安装的服务</p>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[13px] text-content-secondary font-medium">WWW 根目录</label>
-          <input class="input" v-model="config.www_root" placeholder="D:\phpstudy_pro\WWW" />
+          <p class="text-xs text-content-muted mt-1">扫描此目录下的 Extensions 发现已安装的服务；新建站点时网站根默认指向此路径的 WWW 子目录</p>
         </div>
       </div>
     </div>

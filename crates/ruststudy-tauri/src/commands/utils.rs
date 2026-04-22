@@ -1,3 +1,37 @@
+use serde::Serialize;
+use std::sync::LazyLock;
+use std::time::Instant;
+
+static APP_START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+#[derive(Serialize)]
+pub struct AppStats {
+    pub pid: u32,
+    pub memory_mb: Option<u64>,
+    pub uptime_secs: u64,
+}
+
+/// RustStudy 自身的进程统计：PID / 工作集内存 / 运行时长
+#[tauri::command]
+pub async fn get_app_stats() -> Result<AppStats, String> {
+    let pid = std::process::id();
+    // 只有 Windows 查得到内存（借用 adapters 的 tasklist 辅助）
+    #[cfg(target_os = "windows")]
+    let memory_mb = {
+        let map = ruststudy_adapters::process::windows::tasklist_memory_snapshot().await;
+        map.get(&pid).copied()
+    };
+    #[cfg(not(target_os = "windows"))]
+    let memory_mb: Option<u64> = None;
+
+    let uptime_secs = APP_START.elapsed().as_secs();
+    Ok(AppStats {
+        pid,
+        memory_mb,
+        uptime_secs,
+    })
+}
+
 /// Open a URL in the default browser using Windows ShellExecute (handles spaces & special chars)
 #[tauri::command]
 pub async fn open_in_browser(url: String) -> Result<(), String> {

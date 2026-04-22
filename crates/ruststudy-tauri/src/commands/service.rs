@@ -132,7 +132,7 @@ pub async fn start_service(id: String, state: State<'_, AppState>) -> Result<Vec
 
     match state.service_manager.start_with_deps(&mut target, &mut others).await {
         Ok(_) => {
-            let pid = match &target.status { ServiceStatus::Running { pid } => *pid, _ => 0 };
+            let pid = match &target.status { ServiceStatus::Running { pid, .. } => *pid, _ => 0 };
             push_log(&state, LogLevel::Success, "service", format!("{} 启动成功（PID {}）", name, pid), None, None).await;
         }
         Err(e) => {

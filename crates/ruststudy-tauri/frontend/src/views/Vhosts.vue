@@ -44,6 +44,10 @@ const editingId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
 const modalTab = ref<"basic" | "rewrite" | "ssl">("basic");
 const rewritePreset = ref("");
+// WWW 根目录（用户在设置里配的），新建 vhost 时用它作 document_root 默认值
+const wwwRoot = ref<string>("");
+/// 是否用户手动改过 document_root（没改过时，随 server_name 输入自动拼 {www_root}/{server_name}）
+const docRootTouched = ref(false);
 
 const form = ref<FormData>({
   server_name: "", aliases: "", listen_port: 80, document_root: "",
@@ -69,10 +73,27 @@ function showFloat(msg: string, type: "success" | "error" = "success") {
 }
 async function loadVhosts() { try { vhosts.value = await invoke("get_vhosts"); } catch (e) { showError("加载失败: " + e); } }
 async function loadPhpVersions() { try { phpVersions.value = await invoke("get_php_versions"); } catch (e) { showError("加载PHP版本失败: " + e); } }
+async function loadWwwRoot() {
+  try {
+    const cfg = await invoke<{ www_root: string }>("get_config");
+    wwwRoot.value = (cfg.www_root || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  } catch { /* 非致命：用空字符串兜底让用户自己填 */ }
+}
+
+/// 把 server_name 拼成 {www_root}/{server_name} 作为推荐 document_root
+function suggestedDocRoot(serverName: string): string {
+  const name = (serverName || "").trim();
+  if (!wwwRoot.value) return "";
+  if (!name) return wwwRoot.value + "/";
+  return `${wwwRoot.value}/${name}`;
+}
 
 function openCreate() {
   editingId.value = null; modalTab.value = "basic"; rewritePreset.value = "";
-  form.value = { server_name: "", aliases: "", listen_port: 80, document_root: "D:/phpstudy_pro/WWW/",
+  docRootTouched.value = false;
+  // document_root 默认用 www_root，没配就留空让用户自己填
+  const defaultRoot = wwwRoot.value ? `${wwwRoot.value}/` : "";
+  form.value = { server_name: "", aliases: "", listen_port: 80, document_root: defaultRoot,
     php_version: phpVersions.value.length > 0 ? phpVersions.value[0].version : null,
     index_files: "index.php index.html", rewrite_rule: "", autoindex: false,
     ssl_cert: null, ssl_key: null, force_https: false, custom_directives: null, access_log: null,
@@ -83,6 +104,7 @@ function openCreate() {
 function openEdit(vh: VhostInfo) {
   editingId.value = vh.id;
   modalTab.value = "basic";
+  docRootTouched.value = true;  // 编辑时不自动改
   const matched = rewritePresets.find(p => p.value === vh.rewrite_rule && p.value !== "__custom__");
   rewritePreset.value = matched ? matched.value : (vh.rewrite_rule ? "__custom__" : "");
   form.value = { server_name: vh.server_name, aliases: vh.aliases.join(" "), listen_port: vh.listen_port,
@@ -92,6 +114,13 @@ function openEdit(vh: VhostInfo) {
     custom_directives: vh.custom_directives || null, access_log: vh.access_log || null,
     sync_hosts: true, expires_at: formatDate(vh.expires_at || "") };
   showForm.value = true;
+}
+
+/// server_name 输入时如果 document_root 还没被手动改过，自动拼成 {www_root}/{server_name}
+function onServerNameInput() {
+  if (!editingId.value && !docRootTouched.value) {
+    form.value.document_root = suggestedDocRoot(form.value.server_name);
+  }
 }
 
 function onRewritePresetChange(val: string) { rewritePreset.value = val; if (val !== "__custom__") form.value.rewrite_rule = val; }
@@ -145,8 +174,33 @@ async function deleteVhost(id: string) {
   try { vhosts.value = await invoke("delete_vhost", { id }); showSuccess("站点已删除，已自动 reload Web 服务器"); } catch (e) { showError("删除失败: " + e); } finally { busy.value = false; }
 }
 
-async function browseFolder() { const s = await open({ directory: true, multiple: false }); if (s) form.value.document_root = s as string; }
+async function browseFolder() { const s = await open({ directory: true, multiple: false }); if (s) { form.value.document_root = s as string; docRootTouched.value = true; } }
 async function browseFile(field: "ssl_cert" | "ssl_key") { const s = await open({ directory: false, multiple: false, filters: [{ name: "证书", extensions: ["pem","crt","key","cer"] }] }); if (s) form.value[field] = s as string; }
+
+const sslBusy = ref(false);
+async function autoGenCert() {
+  if (sslBusy.value) return;
+  if (!form.value.server_name.trim()) {
+    showError("请先在基础配置里填 server_name（域名）");
+    modalTab.value = "basic";
+    return;
+  }
+  sslBusy.value = true;
+  try {
+    const aliases = form.value.aliases.split(/\s+/).filter(Boolean);
+    const res = await invoke<{ cert_path: string; key_path: string }>(
+      "generate_self_signed_cert",
+      { serverName: form.value.server_name, aliases }
+    );
+    form.value.ssl_cert = res.cert_path;
+    form.value.ssl_key = res.key_path;
+    showSuccess("自签证书生成成功，保存站点即生效");
+  } catch (e) {
+    showError("生成失败: " + e);
+  } finally {
+    sslBusy.value = false;
+  }
+}
 
 const filteredVhosts = computed(() => {
   if (!searchQuery.value.trim()) return vhosts.value;
@@ -188,7 +242,7 @@ async function checkExpired() {
 }
 
 onMounted(() => {
-  loadVhosts(); loadPhpVersions();
+  loadVhosts(); loadPhpVersions(); loadWwwRoot();
   expiryTimer = window.setInterval(checkExpired, 60000); // Check every 60s
 });
 onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
@@ -227,10 +281,10 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
 
         <!-- Tab: 基础配置 -->
         <div v-show="modalTab === 'basic'" class="grid grid-cols-2 gap-3">
-          <div class="fg"><label>域名 <span style="color:var(--color-danger)">*</span></label><input class="input" v-model="form.server_name" placeholder="example.test" /></div>
+          <div class="fg"><label>域名 <span style="color:var(--color-danger)">*</span></label><input class="input" v-model="form.server_name" @input="onServerNameInput" placeholder="example.test" /></div>
           <div class="fg"><label>端口</label><input class="input" type="number" v-model.number="form.listen_port" min="1" max="65535" /></div>
           <div class="fg full"><label>域名别名 <span style="color:var(--text-muted);font-weight:400">多个用空格分隔</span></label><input class="input" v-model="form.aliases" placeholder="www.example.test" /></div>
-          <div class="fg full"><label>网站目录 <span style="color:var(--color-danger)">*</span></label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.document_root" placeholder="D:/phpstudy_pro/WWW/mysite" /><button class="btn btn-secondary btn-sm" @click="browseFolder">浏览</button></div></div>
+          <div class="fg full"><label>网站目录 <span style="color:var(--color-danger)">*</span></label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.document_root" @input="docRootTouched = true" :placeholder="wwwRoot ? wwwRoot + '/mysite' : '/path/to/site'" /><button class="btn btn-secondary btn-sm" @click="browseFolder">浏览</button></div></div>
           <div class="fg"><label>PHP 版本</label><select class="input sel" v-model="form.php_version"><option :value="null">不使用 PHP</option><option v-for="pv in phpVersions" :key="pv.version" :value="pv.version">{{ pv.label }} (:{{ pv.port }})</option></select></div>
           <div class="fg"><label>默认首页</label><input class="input" v-model="form.index_files" placeholder="index.php index.html" /></div>
           <div class="fg"><label>到期日期 <span style="color:var(--text-muted);font-weight:400">留空永不过期</span></label><input class="input" type="date" v-model="form.expires_at" /></div>
@@ -246,8 +300,19 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
 
         <!-- Tab: SSL 与高级 -->
         <div v-show="modalTab === 'ssl'" class="grid grid-cols-2 gap-3">
-          <div class="fg"><label>SSL 证书路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_cert" placeholder="*.pem / *.crt" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_cert')">浏览</button></div></div>
-          <div class="fg"><label>SSL 密钥路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_key" placeholder="*.key" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_key')">浏览</button></div></div>
+          <div class="fg full">
+            <div class="flex items-center justify-between mb-1">
+              <label class="!mb-0">SSL 证书</label>
+              <button class="btn btn-primary btn-sm" :disabled="sslBusy" @click="autoGenCert">
+                {{ sslBusy ? '生成中...' : '🔒 一键生成自签证书' }}
+              </button>
+            </div>
+            <div class="text-[11px]" style="color: var(--text-muted)">
+              本地开发 HTTPS 用。浏览器首次访问会提示"不安全"，手动继续即可；或用 mkcert 把本地 CA 装进系统信任。
+            </div>
+          </div>
+          <div class="fg"><label>证书路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_cert" placeholder="*.pem / *.crt" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_cert')">浏览</button></div></div>
+          <div class="fg"><label>密钥路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_key" placeholder="*.key" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_key')">浏览</button></div></div>
           <div class="fg"><label>强制 HTTPS</label><select class="input sel" v-model="form.force_https"><option :value="false">关闭</option><option :value="true">开启</option></select></div>
           <div class="fg"><label>日志路径</label><input class="input" v-model="form.access_log" placeholder="留空使用默认" /></div>
           <div class="fg full"><label>自定义 Nginx 指令</label><textarea class="input resize-y font-mono text-xs min-h-[140px]" v-model="form.custom_directives" rows="4" placeholder="proxy_pass http://127.0.0.1:3000;"></textarea></div>

@@ -14,6 +14,39 @@ fn persist_vhosts(vhosts: &[VirtualHost], state: &AppState) {
     let _ = state.vhost_manager.save_vhosts_json(&path, vhosts);
 }
 
+// ==================== SSL 自签 ====================
+
+#[derive(Debug, Serialize)]
+pub struct GeneratedCert {
+    pub cert_path: String,
+    pub key_path: String,
+}
+
+/// 为 vhost 生成自签证书，写到 ~/.ruststudy/certs/{server_name}.{crt,key}
+#[tauri::command]
+pub async fn generate_self_signed_cert(
+    server_name: String,
+    aliases: Vec<String>,
+) -> Result<GeneratedCert, String> {
+    if server_name.trim().is_empty() {
+        return Err("请先填写域名（server_name）".into());
+    }
+    // 证书存放目录：~/.ruststudy/certs/
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
+    let out_dir = PathBuf::from(home).join(".ruststudy").join("certs");
+
+    let (cert, key) = ruststudy_adapters::platform::ssl_cert::generate_self_signed(
+        &server_name,
+        &aliases,
+        &out_dir,
+    )?;
+
+    Ok(GeneratedCert {
+        cert_path: cert.display().to_string(),
+        key_path: key.display().to_string(),
+    })
+}
+
 /// Best-effort：尝试给端口加 Windows 防火墙入站放行。
 /// 80 端口通常由 nginx/apache 首次运行时系统已自动提示过，不重复处理。
 async fn try_open_firewall(port: u16, state: &AppState) {
@@ -438,15 +471,36 @@ pub async fn delete_vhost(
 
     let domain = vhost.server_name.clone();
     let deleted_port = vhost.listen_port;
+
+    // 物理删除（.conf / hosts / listen.conf）——失败视为"整个删除失败"
     if let Err(e) = state.vhost_manager.delete_vhost(vhost, &dirs.nginx_vhosts, &dirs.apache_vhosts, &dirs.apache_listen, &vhosts, running_ws).await {
         let msg = e.to_string();
         push_log(&state, LogLevel::Error, "vhost", format!("删除站点 {} 失败", domain), Some(msg.clone()), None).await;
         return Err(msg);
     }
-    push_log(&state, LogLevel::Success, "vhost", format!("删除站点 {}", domain), None, None).await;
 
+    // 物理删除成功：立即从内存列表+持久化移除，避免 UI 卡在旧状态
     vhosts.remove(idx);
     persist_vhosts(&vhosts, &state);
+
+    // 独立 reload：失败不回滚删除（删了就是删了），但要明确通知用户手动重启
+    if let Some(ws) = running_ws {
+        if let Err(e) = state.vhost_manager.reload_web_server(ws).await {
+            push_log(
+                &state,
+                LogLevel::Warn,
+                "vhost",
+                format!("{} 已删除，但 {} reload 失败，请手动重启 Web 服务器",
+                    domain, ws.kind.display_name()),
+                Some(e.to_string()),
+                None,
+            ).await;
+        } else {
+            push_log(&state, LogLevel::Success, "vhost", format!("删除站点 {}", domain), None, None).await;
+        }
+    } else {
+        push_log(&state, LogLevel::Success, "vhost", format!("删除站点 {}", domain), None, None).await;
+    }
 
     // 若此端口不再被其他 vhost 使用 → 关闭防火墙规则（best-effort）
     let vhosts_snap = vhosts.clone();

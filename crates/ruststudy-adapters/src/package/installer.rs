@@ -249,6 +249,36 @@ impl Installer {
             );
         }
 
+        // ---------- PHP 特有：php.net 原版 zip 不带 php.ini，只有两个模板。
+        //           复制 php.ini-production 为 php.ini，避免用户装完后配置页/CLI 报错。
+        if entry.name == "php" {
+            let ini = final_dir.join("php.ini");
+            if !ini.exists() {
+                let production = final_dir.join("php.ini-production");
+                let development = final_dir.join("php.ini-development");
+                let template = if production.exists() {
+                    Some(production)
+                } else if development.exists() {
+                    Some(development)
+                } else {
+                    None
+                };
+                if let Some(src) = template {
+                    if let Err(e) = std::fs::copy(&src, &ini) {
+                        tracing::warn!(
+                            "生成 php.ini 失败 (从 {}): {}",
+                            src.display(),
+                            e
+                        );
+                    } else {
+                        tracing::info!("已生成 php.ini（来自 {}）", src.file_name().unwrap_or_default().to_string_lossy());
+                    }
+                } else {
+                    tracing::warn!("找不到 php.ini-production/development 模板，跳过 ini 初始化");
+                }
+            }
+        }
+
         let _ = tx.send(InstallEvent::Done {
             name: name.clone(),
             version: ver.clone(),

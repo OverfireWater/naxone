@@ -161,9 +161,10 @@ impl AppConfig {
         Ok(())
     }
 
-    /// Create a default config for a fresh PHPStudy-compatible setup
-    pub fn default_with_phpstudy(phpstudy_path: PathBuf) -> Self {
-        let www_root = phpstudy_path.join("WWW");
+    /// Create a default config for a fresh PHPStudy-compatible setup.
+    /// `www_root` 由调用方传入（tauri 层计算：优先 exe 同级便携目录，
+    /// 不可写时 fallback %APPDATA%）。core 不知道 exe 路径，所以不自己决定。
+    pub fn default_with_phpstudy(phpstudy_path: PathBuf, www_root: PathBuf) -> Self {
         Self {
             general: GeneralConfig {
                 data_dir: phpstudy_path.clone(),

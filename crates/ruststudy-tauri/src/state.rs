@@ -79,13 +79,32 @@ impl AppState {
 
         // Try to load config or create default
         let cfg_path = config_path();
-        let config = if cfg_path.exists() {
+        let mut config = if cfg_path.exists() {
             AppConfig::load(&cfg_path).unwrap_or_else(|_| default_config())
         } else {
             let cfg = default_config();
             let _ = cfg.save(&cfg_path);
             cfg
         };
+
+        // 迁移：早期版本默认把 www_root 指向 PHPStudy 的 WWW。现在 RustStudy
+        // 应该放自己目录——优先 exe 同级（便携），fallback 到 %APPDATA%\RustStudy\www
+        if let Some(ps_path) = &config.general.phpstudy_path {
+            let old_default = ps_path.join("WWW");
+            if config.general.www_root == old_default {
+                let new_root = resolve_default_www_root();
+                tracing::info!(
+                    old = ?config.general.www_root,
+                    new = ?new_root,
+                    "迁移 www_root 到 RustStudy 自建目录"
+                );
+                config.general.www_root = new_root;
+                let _ = config.save(&cfg_path);
+            }
+        }
+
+        // 确保 www_root 目录存在（新建站点时默认指向它，空目录也无妨）
+        let _ = std::fs::create_dir_all(&config.general.www_root);
 
         // Scan for installed services from all sources.
         let ext_path = config
@@ -195,6 +214,29 @@ pub fn resolve_packages_root(config: &AppConfig) -> PathBuf {
     appdata.join("RustStudy").join("Extensions")
 }
 
+/// 新用户 / 迁移时使用的默认 WWW 根目录。
+/// 策略同 packages_root：
+///   1. exe 同级可写 → `{exe_dir}/www/`（便携模式、开发模式）
+///   2. 不可写（Program Files）→ `%APPDATA%/RustStudy/www/`
+pub fn resolve_default_www_root() -> PathBuf {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+    {
+        if is_writable_dir(&exe_dir) {
+            return exe_dir.join("www");
+        }
+    }
+    let appdata = std::env::var("APPDATA")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
+            PathBuf::from(home).join("AppData").join("Roaming")
+        });
+    appdata.join("RustStudy").join("www")
+}
+
 /// Legacy root from the first store prototype (`%APPDATA%/RustStudy/Packages/`).
 /// Returned so the scanner can still pick up packages installed before the
 /// PHPStudy-style refactor.
@@ -255,11 +297,12 @@ pub fn config_path() -> PathBuf {
 }
 
 fn default_config() -> AppConfig {
+    let www_root = resolve_default_www_root();
     let phpstudy_path = PathBuf::from(r"D:\phpstudy_pro");
     if phpstudy_path.exists() {
-        AppConfig::default_with_phpstudy(phpstudy_path)
+        AppConfig::default_with_phpstudy(phpstudy_path, www_root)
     } else {
         let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-        AppConfig::default_with_phpstudy(PathBuf::from(home).join(".ruststudy"))
+        AppConfig::default_with_phpstudy(PathBuf::from(home).join(".ruststudy"), www_root)
     }
 }

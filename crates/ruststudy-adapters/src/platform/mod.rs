@@ -6,3 +6,5 @@ pub mod linux;
 
 #[cfg(target_os = "windows")]
 pub mod global_php;
+
+pub mod ssl_cert;

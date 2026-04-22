@@ -185,9 +185,11 @@ fn inspect(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or_default();
-            // Reuse logic from the phpstudy scanner if the folder name matches
-            let (version, variant) = parse_php_dir_name(name);
-            (conf, version, Some(variant))
+            let (folder_version, variant) = parse_php_dir_name(name);
+            // 优先 spawn php.exe -n -v 读真实版本（文件夹名可能撒谎），失败退化到 parse
+            let real_version = super::scanner::detect_real_php_version(path)
+                .unwrap_or(folder_version);
+            (conf, real_version, Some(variant))
         }
     }
 }

@@ -40,9 +40,17 @@ impl ServiceKind {
 pub enum ServiceStatus {
     Stopped,
     Starting,
-    Running { pid: u32 },
+    /// `memory_mb`: 进程工作集内存（MB）。None 表示查询失败或信息不可用。
+    /// serde default 让旧持久化的 JSON 反序列化成功（旧 `Running { pid }` → `memory_mb: None`）
+    Running {
+        pid: u32,
+        #[serde(default)]
+        memory_mb: Option<u64>,
+    },
     Stopping,
-    Failed { reason: String },
+    Failed {
+        reason: String,
+    },
 }
 
 impl ServiceStatus {

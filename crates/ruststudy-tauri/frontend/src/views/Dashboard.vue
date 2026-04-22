@@ -10,7 +10,8 @@ import LogDrawer from "../components/LogDrawer.vue";
 interface ServiceInfo {
   id: string; kind: string; display_name: string; version: string;
   variant: string | null; port: number;
-  status: { state: string; pid?: number }; install_path: string;
+  status: { state: string; pid?: number; memory_mb?: number };
+  install_path: string;
   origin: string; // "phpstudy" | "store" | "manual"
 }
 
@@ -24,6 +25,24 @@ const loaded = ref(false); // 首次 loadServices 返回后置 true，用于切�
 // 每类服务当前选中的版本 id（下拉切版本用）。key 是 kind，value 是 ServiceInfo.id
 const selectedByKind = ref<Record<string, string>>({});
 
+// 本应用自身资源统计
+interface AppStats { pid: number; memory_mb: number | null; uptime_secs: number; }
+const appStats = ref<AppStats | null>(null);
+
+// 格式化运行时长："2h 13m" / "45m 30s" / "1d 2h"
+function fmtUptime(s: number): string {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  if (s < 86400) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${h}h ${m}m`;
+  }
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  return `${d}d ${h}h`;
+}
+
 // 全局 CLI PHP
 interface GlobalPhpInfo { version: string | null; bin_dir: string; path_registered: boolean; conflicts: string[]; }
 const globalPhp = ref<GlobalPhpInfo>({ version: null, bin_dir: "", path_registered: false, conflicts: [] });
@@ -34,6 +53,7 @@ const globalPhpBusy = ref(false);
 
 import { toast } from "../composables/useToast";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 const busyIds = ref<Set<string>>(new Set());
 const recentLogs = ref<LogEntry[]>([]);
 const logDrawerOpen = ref(false);
@@ -41,6 +61,7 @@ const batchBusy = ref(false);
 
 let svcTimer: number | null = null;
 let logTimer: number | null = null;
+let unlistenServicesChanged: UnlistenFn | null = null;
 let pauseUntil = 0;
 
 // ==================== Computed ====================
@@ -75,7 +96,7 @@ const mainKindGroups = computed<KindGroup[]>(() => {
 function originShort(s: ServiceInfo): string {
   if (s.origin === "phpstudy") return "PS";
   if (s.origin === "manual") return "独立";
-  return "商店";
+  return "RS";
 }
 
 /** 在不同版本运行时，从下拉选了另一个版本 + 点"切换" → 停旧启新 */
@@ -113,7 +134,7 @@ function isBusy(id: string): boolean { return busyIds.value.has(id); }
 function originBadge(s: ServiceInfo): { text: string; color: string } | null {
   if (s.origin === "phpstudy") return { text: "PS", color: "#8b5cf6" };
   if (s.origin === "manual") return { text: "独立", color: "#06b6d4" };
-  if (s.origin === "store") return { text: "商店", color: "#22c55e" };
+  if (s.origin === "store") return { text: "RS", color: "#22c55e" };
   return null;
 }
 
@@ -139,6 +160,11 @@ async function loadServices(force = false) {
 
 async function loadRecentLogs() {
   try { recentLogs.value = await invoke("get_logs", { limit: 6 }); }
+  catch {}
+}
+
+async function loadAppStats() {
+  try { appStats.value = await invoke<AppStats>("get_app_stats"); }
   catch {}
 }
 
@@ -292,20 +318,30 @@ function levelColor(level: string): string {
   } as Record<string, string>)[level] || "var(--text-muted)";
 }
 
-onMounted(() => {
+onMounted(async () => {
   // 立即异步加载，不 await，让 skeleton 先渲染出来
   loadServices(true);
   checkStartupErrors();
   loadRecentLogs();
   loadGlobalPhp();
+  loadAppStats();
+  // 后端在装/卸 / rescan 完成后推 services-changed 事件 → 立即刷新，不等轮询
+  unlistenServicesChanged = await listen("services-changed", () => {
+    loadServices(true);
+    loadGlobalPhp();
+  });
   // 轮询从 3s 放宽到 5s（后端已做 status 缓存 + 快速返回 + 后台并行刷新）
-  svcTimer = window.setInterval(() => loadServices(), 5000);
+  svcTimer = window.setInterval(() => {
+    loadServices();
+    loadAppStats();  // 顺带刷新本应用内存/运行时长
+  }, 5000);
   logTimer = window.setInterval(loadRecentLogs, 2000);
 });
 
 onUnmounted(() => {
   if (svcTimer) clearInterval(svcTimer);
   if (logTimer) clearInterval(logTimer);
+  if (unlistenServicesChanged) unlistenServicesChanged();
 });
 </script>
 
@@ -404,8 +440,12 @@ onUnmounted(() => {
                :style="{ color: g.running && g.running.id === g.active.id ? 'var(--color-success-light)' : 'var(--text-muted)' }">
             <template v-if="isBusy(g.active.id)">操作中...</template>
             <template v-else-if="!g.running">已停止</template>
-            <template v-else-if="g.running.id === g.active.id">运行中</template>
-            <template v-else>运行中：v{{ g.running.version }}</template>
+            <template v-else-if="g.running.id === g.active.id">
+              运行中<span v-if="g.running.status.memory_mb != null" class="opacity-70"> · {{ g.running.status.memory_mb }} MB</span>
+            </template>
+            <template v-else>
+              运行中：v{{ g.running.version }}<span v-if="g.running.status.memory_mb != null" class="opacity-70"> · {{ g.running.status.memory_mb }} MB</span>
+            </template>
           </div>
 
           <!-- Actions -->
@@ -445,7 +485,7 @@ onUnmounted(() => {
           <span class="text-[12px] shrink-0" style="color: var(--text-muted)">全局 CLI:</span>
           <select class="version-sel" v-model="globalPhpPick">
             <option v-for="p in phpServices" :key="p.id" :value="p.version">
-              v{{ p.version }}{{ p.variant ? ' '+p.variant : '' }}
+              v{{ p.version }}{{ p.variant ? ' '+p.variant : '' }} [{{ originShort(p) }}]
             </option>
           </select>
           <span v-if="globalPhp.version" class="text-[11px]" style="color: var(--text-muted)">
@@ -506,6 +546,8 @@ onUnmounted(() => {
                     ? { background: 'var(--color-success-light)', boxShadow: '0 0 4px var(--color-success-light)' }
                     : { background: 'var(--color-gray-light)' }"></span>
             <span class="text-[13px] font-mono">{{ p.version }}{{ p.variant ? ' '+p.variant : '' }}</span>
+            <span v-if="isRunning(p) && p.status.memory_mb != null"
+                  class="text-[11px] opacity-60">{{ p.status.memory_mb }}M</span>
           </div>
         </div>
         <div class="flex gap-2">
@@ -533,6 +575,13 @@ onUnmounted(() => {
             <span class="truncate" style="color: var(--text-secondary)">{{ log.message }}</span>
           </div>
         </div>
+      </div>
+
+      <!-- 应用自身状态条 -->
+      <div v-if="appStats" class="flex items-center gap-3 mt-2 text-[11px]" style="color: var(--text-muted)">
+        <span>RustStudy · PID {{ appStats.pid }}</span>
+        <span v-if="appStats.memory_mb != null">· 内存 {{ appStats.memory_mb }} MB</span>
+        <span>· 运行 {{ fmtUptime(appStats.uptime_secs) }}</span>
       </div>
     </template>
 

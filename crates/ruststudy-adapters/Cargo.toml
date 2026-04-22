@@ -16,6 +16,9 @@ reqwest = { version = "0.12", default-features = false, features = ["stream", "r
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 futures-util = "0.3"
+# SSL 自签证书（本地开发 HTTPS）
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
+time = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 # 读取 HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings

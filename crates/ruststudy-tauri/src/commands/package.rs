@@ -348,6 +348,8 @@ pub async fn install_package(
                     // Trigger a services rescan so the newly installed package
                     // shows up in the Dashboard.
                     let _ = rescan_services_inner(&state_snap).await;
+                    // 主动通知前端刷新，不用等 5s 轮询
+                    let _ = app_handle.emit("services-changed", ());
                 }
                 InstallEvent::Failed {
                     name,
@@ -442,6 +444,7 @@ async fn rescan_services_inner(
 pub async fn uninstall_package(
     name: String,
     version: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use ruststudy_core::domain::service::ServiceKind;
@@ -548,6 +551,7 @@ pub async fn uninstall_package(
     // immediately. Use the shallow-cloned state pattern used elsewhere.
     let state_snap = std::sync::Arc::new(state.inner().clone_shallow());
     let _ = rescan_services_inner(&state_snap).await;
+    let _ = app.emit("services-changed", ());
 
     Ok(())
 }

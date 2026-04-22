@@ -297,12 +297,9 @@ impl VhostManager {
             }
         }
 
-        // 4. Reload web server — propagate errors
-        if let Some(instance) = running_web_server {
-            if instance.status.is_running() {
-                self.process_mgr.reload(instance).await?;
-            }
-        }
+        // 注意：不在这里 reload。命令层拿到 Ok 后自己调 reload_web_server，
+        // 这样 reload 失败能**独立处理**——物理删除已完成，不应被视为"整个删除失败"。
+        let _ = running_web_server;
 
         Ok(())
     }
