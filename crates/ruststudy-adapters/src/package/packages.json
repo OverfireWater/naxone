@@ -50,31 +50,15 @@
       "brand_color": "#d22128",
       "brand_letter": "A",
       "homepage": "https://www.apachelounge.com/",
-      "description": "由 Apache Lounge 提供的 Windows VS17 build",
+      "description": "由 Apache Lounge 提供的 Windows VS18 build",
       "versions": [
         {
-          "version": "2.4.63",
-          "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.63-250207-win64-VS17.zip",
+          "version": "2.4.66",
+          "url": "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.66-260223-Win64-VS18.zip",
           "sha256": null,
-          "size_mb": 13,
+          "size_mb": 12,
           "exe_rel": "bin/httpd.exe",
-          "variant": null
-        },
-        {
-          "version": "2.4.62",
-          "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-240904-win64-VS17.zip",
-          "sha256": null,
-          "size_mb": 13,
-          "exe_rel": "bin/httpd.exe",
-          "variant": null
-        },
-        {
-          "version": "2.4.58",
-          "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.58-240404-win64-VS17.zip",
-          "sha256": null,
-          "size_mb": 13,
-          "exe_rel": "bin/httpd.exe",
-          "variant": null
+          "variant": "Win64 · VS18"
         }
       ]
     },

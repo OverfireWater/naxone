@@ -84,7 +84,7 @@ fn scan_packages_root(root: &Path) -> Vec<ServiceInstance> {
 /// Probe a path to see whether it looks like a valid install of `kind`.
 /// The `install_path` returned is always the directory that contains `conf/`,
 /// `bin/`, etc. — i.e. the same layout as PhpStudy's scanner.
-fn probe_install(path: &Path, kind: ServiceKind, origin: ServiceOrigin) -> Option<ServiceInstance> {
+pub(crate) fn probe_install(path: &Path, kind: ServiceKind, origin: ServiceOrigin) -> Option<ServiceInstance> {
     if !path.exists() {
         return None;
     }
@@ -116,7 +116,7 @@ fn probe_install(path: &Path, kind: ServiceKind, origin: ServiceOrigin) -> Optio
     })
 }
 
-fn looks_like_install(path: &Path, kind: ServiceKind) -> bool {
+pub(crate) fn looks_like_install(path: &Path, kind: ServiceKind) -> bool {
     match kind {
         ServiceKind::Nginx => path.join("nginx.exe").exists(),
         ServiceKind::Apache => path.join("bin").join("httpd.exe").exists(),

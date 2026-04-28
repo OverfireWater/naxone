@@ -9,6 +9,7 @@ pub struct AppStats {
     pub pid: u32,
     pub memory_mb: Option<u64>,
     pub uptime_secs: u64,
+    pub is_dev: bool,
 }
 
 /// RustStudy 自身的进程统计：PID / 工作集内存 / 运行时长
@@ -29,6 +30,7 @@ pub async fn get_app_stats() -> Result<AppStats, String> {
         pid,
         memory_mb,
         uptime_secs,
+        is_dev: cfg!(debug_assertions),
     })
 }
 

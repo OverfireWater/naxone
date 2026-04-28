@@ -55,6 +55,9 @@ pub struct GeneralConfig {
     /// 不影响 vhost 绑定的 PHP 版本，只影响用户命令行里敲 `php -v`。
     #[serde(default)]
     pub global_php_version: Option<String>,
+    /// 托盘“退出”时是否先停止全部服务。
+    #[serde(default)]
+    pub stop_services_on_exit: bool,
 }
 
 fn default_auto_start() -> Vec<String> {
@@ -176,6 +179,7 @@ impl AppConfig {
                 extra_install_paths: Vec::new(),
                 package_install_root: None,
                 global_php_version: None,
+                stop_services_on_exit: false,
             },
             web_server: WebServerConfig::default(),
             mysql: MysqlConfig::default(),

@@ -53,7 +53,9 @@ pub async fn refresh_package_index() -> Result<Vec<PackageEntry>, String> {
 }
 
 async fn list_packages_impl(force: bool) -> Result<Vec<PackageEntry>, String> {
-    Ok(load_merged_manifest(force).await.packages)
+    let mut manifest = load_merged_manifest(force).await;
+    manifest.packages.retain(|p| !p.versions.is_empty());
+    Ok(manifest.packages)
 }
 
 /// 加载内嵌清单 + 合并**镜像源**（GitHub 镜像仓库）最新版本。
@@ -68,10 +70,21 @@ async fn load_merged_manifest(force: bool) -> crate::commands::package::manifest
     // 1) 尝试镜像
     if let Some(mirror) = load_mirror_manifest(force).await {
         for (software, versions) in mirror {
-            if let Some(pkg) = manifest.packages.iter_mut().find(|p| p.name == software) {
-                merge_versions(&mut pkg.versions, versions);
+            let incoming: Vec<PackageVersion> = versions
+                .into_iter()
+                .filter(|v| {
+                    if software != "apache" {
+                        return true;
+                    }
+                    !matches!(v.version.as_str(), "2.4.63" | "2.4.62" | "2.4.58")
+                })
+                .collect();
+            if incoming.is_empty() {
+                continue;
             }
-            // 镜像里有但内嵌没定义的软件 → 忽略（UI 元数据无从生成）
+            if let Some(pkg) = manifest.packages.iter_mut().find(|p| p.name == software) {
+                merge_versions(&mut pkg.versions, incoming);
+            }
         }
         return manifest;
     }
@@ -96,8 +109,6 @@ async fn load_mirror_manifest(
             tracing::debug!("Mirror manifest served from fresh cache");
             return Some(cached);
         }
-    } else {
-        cache.invalidate();
     }
     match github_mirror::fetch().await {
         Ok(fresh) => {
@@ -129,8 +140,6 @@ async fn load_php_versions(force: bool) -> Option<Vec<PackageVersion>> {
             tracing::debug!("PHP versions served from fresh cache");
             return Some(cached);
         }
-    } else {
-        cache.invalidate();
     }
 
     match php_official::fetch().await {
@@ -161,20 +170,57 @@ fn cache_dir() -> std::path::PathBuf {
 /// - 镜像不包含的内嵌版本保留（EOL 版本等）
 /// - 合并后**按版本号降序整体排序**，避免镜像段和内嵌段视觉上出现 7.4 → 8.4 跳跃
 fn merge_versions(existing: &mut Vec<PackageVersion>, incoming: Vec<PackageVersion>) {
-    let incoming_versions: std::collections::HashSet<String> =
-        incoming.iter().map(|v| v.version.clone()).collect();
+    let mut existing_by_ver: std::collections::HashMap<String, PackageVersion> =
+        existing.drain(..).map(|v| (v.version.clone(), v)).collect();
 
-    let mut result: Vec<PackageVersion> = Vec::with_capacity(existing.len() + incoming.len());
-    result.extend(incoming);
-    for v in existing.drain(..) {
-        if !incoming_versions.contains(&v.version) {
-            result.push(v);
+    let mut result: Vec<PackageVersion> = Vec::with_capacity(existing_by_ver.len() + incoming.len());
+
+    for mut inc in incoming {
+        if let Some(base) = existing_by_ver.remove(&inc.version) {
+            // 镜像版本优先，但保留内嵌 URL 作为最终兜底。
+            // 这样当 download_urls 全部失败时，仍可退到内嵌官方 URL。
+            let mut merged_urls: Vec<String> = Vec::new();
+
+            for u in inc.candidate_urls() {
+                if !merged_urls.contains(&u) {
+                    merged_urls.push(u);
+                }
+            }
+            for u in base.candidate_urls() {
+                if !merged_urls.contains(&u) {
+                    merged_urls.push(u);
+                }
+            }
+
+            if !merged_urls.is_empty() {
+                inc.url = merged_urls[0].clone();
+                inc.download_urls = merged_urls;
+            }
+
+            if inc.sha256.is_none() {
+                inc.sha256 = base.sha256;
+            }
+            if inc.size_mb.is_none() {
+                inc.size_mb = base.size_mb;
+            }
+            if inc.exe_rel.is_empty() {
+                inc.exe_rel = base.exe_rel;
+            }
+            if inc.variant.is_none() {
+                inc.variant = base.variant;
+            }
         }
+        result.push(inc);
     }
+
+    // 保留镜像未覆盖到的内嵌版本（EOL 等）
+    result.extend(existing_by_ver.into_values());
+
     // 统一按语义版本降序排列（8.5.5 > 8.4.20 > 8.4.2 > 8.1.27 > 7.4.33）
     result.sort_by(|a, b| semver_cmp_desc(&a.version, &b.version));
     *existing = result;
 }
+
 
 /// 两段版本号按数字段降序比较。"8.4.20" > "8.4.2" > "8.3.30"。
 /// 非数字段落到字符串对比。
@@ -218,11 +264,11 @@ pub async fn get_installed_packages(
     let mut out: Vec<InstalledPackage> = Vec::new();
 
     for svc in services.iter() {
-        // Only count services sourced from the store or legacy Packages root.
-        // Exclude PhpStudy origin: PHPStudy's own installs aren't "ours".
+        // Only count services sourced from the store.
+        // Exclude PhpStudy/manual/system installs: they are not store-managed.
         match svc.origin {
-            ServiceOrigin::Store | ServiceOrigin::Manual => {}
-            ServiceOrigin::PhpStudy => continue,
+            ServiceOrigin::Store => {}
+            ServiceOrigin::PhpStudy | ServiceOrigin::Manual | ServiceOrigin::System => continue,
         }
 
         let name = match svc.kind {
@@ -432,14 +478,6 @@ async fn rescan_services_inner(
     Ok(())
 }
 
-/// Remove an installed package. Only operates on the store root —
-/// PHPStudy-native and user-manual installs are off-limits (we didn't
-/// put those there).
-///
-/// Safety checks:
-///   1. The manifest must know this (name, version) — no wildcard deletes.
-///   2. The matching service must not be running.
-///   3. The target directory must be under our packages root (no escape).
 #[tauri::command]
 pub async fn uninstall_package(
     name: String,
@@ -508,8 +546,8 @@ pub async fn uninstall_package(
 
     if !target_dir.exists() {
         let msg = format!("{} v{} 未安装（目录不存在）", pkg.display_name, version);
-        push_log(&state, LogLevel::Info, "store", msg.clone(), None, None).await;
-        return Err(msg);
+        push_log(&state, LogLevel::Info, "store", msg, None, None).await;
+        return Ok(());
     }
 
     // Actually delete

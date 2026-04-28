@@ -3,6 +3,10 @@ name = "ruststudy-tauri"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "RustStudy"
+path = "src/main.rs"
+
 [dependencies]
 ruststudy-core = { path = "../ruststudy-core" }
 ruststudy-adapters = { path = "../ruststudy-adapters" }
@@ -13,6 +17,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.7.0"
+tauri-plugin-single-instance = "2"
 chrono = "0.4.44"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

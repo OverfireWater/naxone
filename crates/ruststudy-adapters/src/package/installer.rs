@@ -68,7 +68,7 @@ pub struct Installer {
 impl Installer {
     pub fn new(packages_root: PathBuf) -> Self {
         let mut builder = reqwest::Client::builder()
-            .user_agent("RustStudy/0.1.0")
+            .user_agent("RustStudy/0.2.1")
             .connect_timeout(std::time::Duration::from_secs(15))
             // 整体请求超时：避免国外镜像响应极慢时前端永远卡在"连接中"
             .timeout(std::time::Duration::from_secs(600))
@@ -163,6 +163,12 @@ impl Installer {
             tracing::info!(attempt = idx + 1, total = urls.len(), url = %url, "下载尝试");
             match self.download(&name, &ver, url, &temp_zip, &tx).await {
                 Ok(()) => {
+                    if let Err(e) = validate_zip_file(&temp_zip) {
+                        tracing::warn!(url = %url, "下载内容不是有效 zip: {}", e);
+                        download_err = Some(format!("{}（{}）", e, url));
+                        continue;
+                    }
+                    tracing::info!(url = %url, "下载完成并通过 zip 校验");
                     download_err = None;
                     break;
                 }
@@ -191,102 +197,8 @@ impl Installer {
             }
         }
 
-        // ---------- unzip ----------
-        let _ = tx.send(InstallEvent::Extracting {
-            name: name.clone(),
-            version: ver.clone(),
-        });
-        if let Err(e) = std::fs::create_dir_all(&unpacked) {
-            let _ = std::fs::remove_file(&temp_zip);
-            return fail(&tx, &name, &ver, format!("创建解压目录失败: {}", e));
-        }
-        if let Err(e) = unzip(&temp_zip, &unpacked) {
-            let _ = std::fs::remove_dir_all(&unpacked);
-            let _ = std::fs::remove_file(&temp_zip);
-            return fail(&tx, &name, &ver, e);
-        }
-        let _ = std::fs::remove_file(&temp_zip);
-
-        // ---------- unwrap ----------
-        // If unpacked/ contains exactly one subdirectory and no files, treat
-        // that subdirectory as the real install root.
-        let source_dir = unwrap_single_subdir(&unpacked).unwrap_or(unpacked.clone());
-
-        // ---------- move to final ----------
-        if let Some(parent) = final_dir.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        // Prefer atomic rename; fall back to copy-then-delete across volumes.
-        if let Err(e) = std::fs::rename(&source_dir, &final_dir) {
-            // Cross-volume? copy + remove source
-            tracing::warn!(
-                "rename failed ({}), falling back to copy: {} → {}",
-                e,
-                source_dir.display(),
-                final_dir.display()
-            );
-            if let Err(e2) = copy_dir_all(&source_dir, &final_dir) {
-                let _ = std::fs::remove_dir_all(&unpacked);
-                return fail(&tx, &name, &ver, format!("移动到最终目录失败: {}", e2));
-            }
-            let _ = std::fs::remove_dir_all(&source_dir);
-        }
-
-        // ---------- cleanup staging ----------
-        let _ = std::fs::remove_dir_all(&unpacked);
-
-        // ---------- verify final exe exists ----------
-        let exe_final = final_dir.join(&version.exe_rel);
-        if !exe_final.exists() {
-            return fail(
-                &tx,
-                &name,
-                &ver,
-                format!(
-                    "解压后未找到预期文件 {} (检查 exe_rel 或 zip 结构)",
-                    exe_final.display()
-                ),
-            );
-        }
-
-        // ---------- PHP 特有：php.net 原版 zip 不带 php.ini，只有两个模板。
-        //           复制 php.ini-production 为 php.ini，避免用户装完后配置页/CLI 报错。
-        if entry.name == "php" {
-            let ini = final_dir.join("php.ini");
-            if !ini.exists() {
-                let production = final_dir.join("php.ini-production");
-                let development = final_dir.join("php.ini-development");
-                let template = if production.exists() {
-                    Some(production)
-                } else if development.exists() {
-                    Some(development)
-                } else {
-                    None
-                };
-                if let Some(src) = template {
-                    if let Err(e) = std::fs::copy(&src, &ini) {
-                        tracing::warn!(
-                            "生成 php.ini 失败 (从 {}): {}",
-                            src.display(),
-                            e
-                        );
-                    } else {
-                        tracing::info!("已生成 php.ini（来自 {}）", src.file_name().unwrap_or_default().to_string_lossy());
-                    }
-                } else {
-                    tracing::warn!("找不到 php.ini-production/development 模板，跳过 ini 初始化");
-                }
-            }
-        }
-
-        let _ = tx.send(InstallEvent::Done {
-            name: name.clone(),
-            version: ver.clone(),
-            install_path: final_dir.display().to_string(),
-        });
-        Ok(final_dir)
+        finalize_install(entry, version, &name, &ver, &final_dir, &temp_zip, &unpacked, &tx)
     }
-
     async fn download(
         &self,
         name: &str,
@@ -295,8 +207,6 @@ impl Installer {
         dest: &Path,
         tx: &UnboundedSender<InstallEvent>,
     ) -> Result<(), String> {
-        // 先发一个 Started 事件，让前端立刻从 "连接中..." 切到 "下载中 0%"
-        // 否则国外镜像握手慢时用户会以为程序死了
         let _ = tx.send(InstallEvent::Started {
             name: name.into(),
             version: version.into(),
@@ -310,12 +220,39 @@ impl Installer {
             .await
             .map_err(|e| format!("网络请求失败（{}）: {}", url, e))?;
 
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}: {}", resp.status().as_u16(), url));
+        let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<unknown>")
+            .to_string();
+        let total = resp.content_length();
+
+        tracing::info!(
+            url = %url,
+            status = %status,
+            content_type = %content_type,
+            content_length = ?total,
+            "下载响应信息"
+        );
+
+        if !status.is_success() {
+            return Err(format!(
+                "HTTP {}: {} (content-type: {})",
+                status.as_u16(),
+                url,
+                content_type
+            ));
         }
 
-        let total = resp.content_length();
-        // 拿到 content-length 后补发一次 Started，携带真实大小
+        if content_type.to_ascii_lowercase().starts_with("text/html") {
+            return Err(format!(
+                "下载响应为 HTML（疑似拦截页/错误页），非安装包: {}",
+                url
+            ));
+        }
+
         if total.is_some() {
             let _ = tx.send(InstallEvent::Started {
                 name: name.into(),
@@ -332,7 +269,6 @@ impl Installer {
         let mut downloaded: u64 = 0;
         let mut last_emit_bytes: u64 = 0;
         let mut last_emit_at = std::time::Instant::now();
-        // 双条件节流：满一个就 emit —— 避免慢下载事件稀疏、也避免快下载事件洪水
         const EMIT_BYTES_THRESHOLD: u64 = 256 * 1024;
         const EMIT_TIME_THRESHOLD_MS: u128 = 300;
 
@@ -363,12 +299,17 @@ impl Installer {
         }
 
         file.flush().await.map_err(|e| format!("刷盘失败: {}", e))?;
-        drop(file);
 
-        // 收尾：无条件发一次"完成"状态的 Progress（即便服务器没给 total）
+        tracing::info!(
+            url = %url,
+            bytes = downloaded,
+            content_type = %content_type,
+            "下载完成"
+        );
+
         let final_pct = match total {
             Some(t) if t > 0 => 100.0,
-            _ => 0.0, // total 未知时让前端继续看 MB 数字
+            _ => 0.0,
         };
         let _ = tx.send(InstallEvent::Progress {
             name: name.into(),
@@ -398,6 +339,38 @@ pub fn phpstudy_style_dir_name(name: &str, version: &str) -> String {
         "php" => format!("php/php{}nts", version.replace('.', "")),
         other => format!("{}{}", other, version),
     }
+}
+
+/// Walk the unpacked tree to find the directory that actually contains `exe_rel`.
+/// Handles nested wrappers (e.g. Apache Lounge zips have httpd-xxx/Apache24/bin/httpd.exe).
+/// Falls back to the unpacked root if nothing matches.
+fn find_exe_root(unpacked: &Path, exe_rel: &str) -> PathBuf {
+    if unpacked.join(exe_rel).exists() {
+        return unpacked.to_path_buf();
+    }
+    // Search up to 3 levels deep for the exe
+    fn search(dir: &Path, exe_rel: &str, depth: u32) -> Option<PathBuf> {
+        if depth == 0 { return None; }
+        let rd = std::fs::read_dir(dir).ok()?;
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join(exe_rel).exists() {
+                return Some(path);
+            }
+        }
+        // Recurse into single-subdir wrappers
+        let rd = std::fs::read_dir(dir).ok()?;
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = search(&path, exe_rel, depth - 1) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    search(unpacked, exe_rel, 3).unwrap_or_else(|| unpacked.to_path_buf())
 }
 
 /// If `dir` contains exactly one subdirectory and no regular files, return
@@ -440,6 +413,12 @@ async fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
 
 /// Extract a zip file. Uses zip crate's enclosed_name() which honors the
 /// utf-8 flag and strips zip-slip traversal.
+fn validate_zip_file(path: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("打开下载文件失败: {}", e))?;
+    let _ = zip::ZipArchive::new(file).map_err(|e| format!("下载文件不是有效 zip: {}", e))?;
+    Ok(())
+}
+
 fn unzip(src: &Path, dst: &Path) -> Result<(), String> {
     let file = std::fs::File::open(src).map_err(|e| format!("打开 zip 失败: {}", e))?;
     let mut archive =
@@ -500,6 +479,102 @@ fn fail(
         reason: reason.clone(),
     });
     Err(reason)
+}
+
+fn finalize_install(
+    entry: &PackageEntry,
+    version: &PackageVersion,
+    name: &str,
+    ver: &str,
+    final_dir: &Path,
+    temp_zip: &Path,
+    unpacked: &Path,
+    tx: &UnboundedSender<InstallEvent>,
+) -> Result<PathBuf, String> {
+    let _ = tx.send(InstallEvent::Extracting {
+        name: name.to_string(),
+        version: ver.to_string(),
+    });
+    if let Err(e) = std::fs::create_dir_all(unpacked) {
+        let _ = std::fs::remove_file(temp_zip);
+        return fail(tx, name, ver, format!("创建解压目录失败: {}", e));
+    }
+    if let Err(e) = unzip(temp_zip, unpacked) {
+        let _ = std::fs::remove_dir_all(unpacked);
+        let _ = std::fs::remove_file(temp_zip);
+        return fail(tx, name, ver, e);
+    }
+    let _ = std::fs::remove_file(temp_zip);
+
+    let source_dir = find_exe_root(unpacked, &version.exe_rel);
+
+    if let Some(parent) = final_dir.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = std::fs::rename(&source_dir, final_dir) {
+        tracing::warn!(
+            "rename failed ({}), falling back to copy: {} → {}",
+            e,
+            source_dir.display(),
+            final_dir.display()
+        );
+        if let Err(e2) = copy_dir_all(&source_dir, final_dir) {
+            let _ = std::fs::remove_dir_all(final_dir);
+            let _ = std::fs::remove_dir_all(unpacked);
+            return fail(tx, name, ver, format!("移动到最终目录失败: {}", e2));
+        }
+        let _ = std::fs::remove_dir_all(&source_dir);
+    }
+
+    let _ = std::fs::remove_dir_all(unpacked);
+
+    let exe_final = final_dir.join(&version.exe_rel);
+    if !exe_final.exists() {
+        let _ = std::fs::remove_dir_all(final_dir);
+        return fail(
+            tx,
+            name,
+            ver,
+            format!(
+                "解压后未找到预期文件 {} (检查 exe_rel 或 zip 结构)",
+                exe_final.display()
+            ),
+        );
+    }
+
+    if entry.name == "php" {
+        let ini = final_dir.join("php.ini");
+        if !ini.exists() {
+            let production = final_dir.join("php.ini-production");
+            let development = final_dir.join("php.ini-development");
+            let template = if production.exists() {
+                Some(production)
+            } else if development.exists() {
+                Some(development)
+            } else {
+                None
+            };
+            if let Some(src) = template {
+                if let Err(e) = std::fs::copy(&src, &ini) {
+                    tracing::warn!("生成 php.ini 失败 (从 {}): {}", src.display(), e);
+                } else {
+                    tracing::info!(
+                        "已生成 php.ini（来自 {}）",
+                        src.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                }
+            } else {
+                tracing::warn!("找不到 php.ini-production/development 模板，跳过 ini 初始化");
+            }
+        }
+    }
+
+    let _ = tx.send(InstallEvent::Done {
+        name: name.to_string(),
+        version: ver.to_string(),
+        install_path: final_dir.display().to_string(),
+    });
+    Ok(final_dir.to_path_buf())
 }
 
 #[cfg(test)]

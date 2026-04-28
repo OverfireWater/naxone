@@ -3,9 +3,10 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, ChevronRight, Store, Settings2 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
+import { APP_NAME } from "../composables/useAppInfo";
+import LogDrawer from "../components/LogDrawer.vue";
 
 const router = useRouter();
-import LogDrawer from "../components/LogDrawer.vue";
 
 interface ServiceInfo {
   id: string; kind: string; display_name: string; version: string;
@@ -26,8 +27,11 @@ const loaded = ref(false); // 首次 loadServices 返回后置 true，用于切�
 const selectedByKind = ref<Record<string, string>>({});
 
 // 本应用自身资源统计
-interface AppStats { pid: number; memory_mb: number | null; uptime_secs: number; }
+interface AppStats { pid: number; memory_mb: number | null; uptime_secs: number; is_dev: boolean; }
 const appStats = ref<AppStats | null>(null);
+// 前端本地秒表：后端每 5s 给一次 uptime_secs 基准值，本地每秒 +1 实现秒级刷新
+const localUptime = ref(0);
+
 
 // 在线更新检查
 interface UpdateInfo { available: boolean; latest_version: string; current_version: string; release_url: string; release_notes: string; download_url: string | null; }
@@ -66,8 +70,22 @@ const batchBusy = ref(false);
 
 let svcTimer: number | null = null;
 let logTimer: number | null = null;
+let uptimeTimer: number | null = null;
 let unlistenServicesChanged: UnlistenFn | null = null;
 let pauseUntil = 0;
+const INVOKE_TIMEOUT_MS = 10000;
+const bgErrorAt = new Map<string, number>();
+
+async function invokeWithTimeout<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  timeoutMs = INVOKE_TIMEOUT_MS,
+): Promise<T> {
+  const timeout = new Promise<never>((_, reject) => {
+    window.setTimeout(() => reject(new Error(`${command} 超时`)), timeoutMs);
+  });
+  return await Promise.race([invoke<T>(command, args), timeout]);
+}
 
 // ==================== Computed ====================
 
@@ -101,6 +119,7 @@ const mainKindGroups = computed<KindGroup[]>(() => {
 function originShort(s: ServiceInfo): string {
   if (s.origin === "phpstudy") return "PS";
   if (s.origin === "manual") return "独立";
+  if (s.origin === "system") return "系统";
   return "RS";
 }
 
@@ -114,7 +133,7 @@ async function switchToActive(kind: string, g: KindGroup) {
   toast.info(`切换到 ${targetLabel}...`);
   try {
     // start_service 后端的 start_with_deps 会先停同 kind 其他版本
-    services.value = await invoke("start_service", { id: targetId });
+    services.value = await invokeWithTimeout("start_service", { id: targetId });
     toast.success(`已切换到 ${targetLabel}`);
   } catch (e) {
     showError(`切换失败: ${e}`);
@@ -127,9 +146,6 @@ async function switchToActive(kind: string, g: KindGroup) {
 
 const phpServices = computed(() => services.value.filter(s => s.kind === "php"));
 
-const runningCount = computed(() => services.value.filter(isRunning).length);
-const totalCount = computed(() => services.value.length);
-const stoppedCount = computed(() => totalCount.value - runningCount.value);
 const phpRunning = computed(() => phpServices.value.filter(isRunning).length);
 
 // ==================== Helpers ====================
@@ -140,6 +156,7 @@ function originBadge(s: ServiceInfo): { text: string; color: string } | null {
   if (s.origin === "phpstudy") return { text: "PS", color: "#8b5cf6" };
   if (s.origin === "manual") return { text: "独立", color: "#06b6d4" };
   if (s.origin === "store") return { text: "RS", color: "#22c55e" };
+  if (s.origin === "system") return { text: "系统", color: "#f59e0b" };
   return null;
 }
 
@@ -164,40 +181,74 @@ async function loadServices(force = false) {
 }
 
 async function loadRecentLogs() {
-  try { recentLogs.value = await invoke("get_logs", { limit: 6 }); }
-  catch {}
+  try {
+    recentLogs.value = await invokeWithTimeout<LogEntry[]>("get_logs", { limit: 6 });
+  } catch (e) {
+    const now = Date.now();
+    const last = bgErrorAt.get("recent_logs") ?? 0;
+    if (now - last > 15000) {
+      bgErrorAt.set("recent_logs", now);
+      toast.warn(`日志刷新失败: ${e}`);
+    }
+  }
 }
 
 async function loadAppStats() {
-  try { appStats.value = await invoke<AppStats>("get_app_stats"); }
-  catch {}
+  try {
+    const stats = await invokeWithTimeout<AppStats>("get_app_stats");
+    appStats.value = stats;
+    localUptime.value = stats.uptime_secs;
+  } catch (e) {
+    const now = Date.now();
+    const last = bgErrorAt.get("app_stats") ?? 0;
+    if (now - last > 15000) {
+      bgErrorAt.set("app_stats", now);
+      toast.warn(`资源统计刷新失败: ${e}`);
+    }
+  }
 }
 
 async function checkForUpdates() {
-  try { updateInfo.value = await invoke<UpdateInfo>("check_for_updates"); }
-  catch { /* 静默：网络失败不影响使用 */ }
+  try {
+    updateInfo.value = await invokeWithTimeout<UpdateInfo>("check_for_updates", undefined, 12000);
+  } catch (e) {
+    const now = Date.now();
+    const last = bgErrorAt.get("updates") ?? 0;
+    if (now - last > 30000) {
+      bgErrorAt.set("updates", now);
+      toast.warn(`更新检查失败: ${e}`);
+    }
+  }
 }
 
 function openUpdatePage() {
   const url = updateInfo.value?.download_url || updateInfo.value?.release_url;
-  if (url) invoke("open_in_browser", { url });
+  if (url) invokeWithTimeout("open_in_browser", { url }).catch((e) => showError(`打开下载页失败: ${e}`));
 }
 
 async function checkStartupErrors() {
   try {
-    const errs: string[] = await invoke("get_startup_errors");
+    const errs: string[] = await invokeWithTimeout("get_startup_errors");
     for (const e of errs) showError(e);
-  } catch {}
+  } catch (e) {
+    showError(`读取启动错误失败: ${e}`);
+  }
 }
 
 async function loadGlobalPhp() {
   try {
-    globalPhp.value = await invoke<GlobalPhpInfo>("get_global_php_version");
-    // 下拉默认回落到当前全局版本；没有就取第一个可用 PHP
+    globalPhp.value = await invokeWithTimeout<GlobalPhpInfo>("get_global_php_version");
     if (!globalPhpPick.value) {
       globalPhpPick.value = globalPhp.value.version ?? phpServices.value[0]?.version ?? "";
     }
-  } catch (e) { /* 非致命，静默 */ }
+  } catch (e) {
+    const now = Date.now();
+    const last = bgErrorAt.get("global_php") ?? 0;
+    if (now - last > 15000) {
+      bgErrorAt.set("global_php", now);
+      toast.warn(`读取全局 PHP 失败: ${e}`);
+    }
+  }
 }
 
 async function fixConflicts() {
@@ -210,7 +261,7 @@ async function fixConflicts() {
   if (!ok) return;
   conflictFixBusy.value = true;
   try {
-    globalPhp.value = await invoke<GlobalPhpInfo>("fix_global_php_conflicts", { paths: list });
+    globalPhp.value = await invokeWithTimeout<GlobalPhpInfo>("fix_global_php_conflicts", { paths: list });
     if (globalPhp.value.conflicts.length === 0) {
       toast.success("清理完成。请**新开** cmd 窗口验证。");
     } else {
@@ -225,7 +276,7 @@ async function fixConflicts() {
 
 async function openEnvEditor() {
   try {
-    await invoke("open_system_env_editor");
+    await invokeWithTimeout("open_system_env_editor");
   } catch (e) {
     showError(`打开失败: ${e}`);
   }
@@ -243,7 +294,7 @@ async function applyGlobalPhp() {
 
   globalPhpBusy.value = true;
   try {
-    globalPhp.value = await invoke<GlobalPhpInfo>("set_global_php_version", { version });
+    globalPhp.value = await invokeWithTimeout<GlobalPhpInfo>("set_global_php_version", { version });
     const tip = firstTime && globalPhp.value.path_registered
       ? `全局 PHP 已切到 v${version}。请**新开** cmd 窗口跑 \`php -v\` 验证。`
       : `全局 PHP 已切到 v${version}`;
@@ -259,7 +310,7 @@ async function applyGlobalPhp() {
 
 async function startService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
-  try { services.value = await invoke("start_service", { id }); }
+  try { services.value = await invokeWithTimeout("start_service", { id }); }
   catch (e) { showError("启动失败: " + e); }
   finally { busyIds.value.delete(id); }
 }
@@ -267,7 +318,7 @@ async function startService(id: string) {
 async function stopService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
   try {
-    const updated: ServiceInfo = await invoke("stop_service", { id });
+    const updated: ServiceInfo = await invokeWithTimeout("stop_service", { id });
     const idx = services.value.findIndex(s => s.id === id);
     if (idx >= 0) services.value[idx] = updated;
   } catch (e) { showError("停止失败: " + e); }
@@ -277,7 +328,7 @@ async function stopService(id: string) {
 async function restartService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
   try {
-    const updated: ServiceInfo = await invoke("restart_service", { id });
+    const updated: ServiceInfo = await invokeWithTimeout("restart_service", { id });
     const idx = services.value.findIndex(s => s.id === id);
     if (idx >= 0) services.value[idx] = updated;
   } catch (e) { showError("重启失败: " + e); }
@@ -287,7 +338,7 @@ async function restartService(id: string) {
 async function startAll() {
   if (batchBusy.value) return;
   batchBusy.value = true; pauseAutoRefresh();
-  try { services.value = await invoke("start_all"); }
+  try { services.value = await invokeWithTimeout("start_all"); }
   catch (e) { showError("全部启动失败: " + e); }
   finally { batchBusy.value = false; }
 }
@@ -295,7 +346,7 @@ async function startAll() {
 async function stopAll() {
   if (batchBusy.value) return;
   batchBusy.value = true; pauseAutoRefresh();
-  try { services.value = await invoke("stop_all"); }
+  try { services.value = await invokeWithTimeout("stop_all"); }
   catch (e) { showError("全部停止失败: " + e); }
   finally { batchBusy.value = false; }
 }
@@ -304,7 +355,7 @@ async function startAllPhp() {
   pauseAutoRefresh();
   for (const p of phpServices.value.filter(p => !isRunning(p))) {
     busyIds.value.add(p.id);
-    try { services.value = await invoke("start_service", { id: p.id }); } catch {}
+    try { services.value = await invokeWithTimeout("start_service", { id: p.id }); } catch (e) { showError(`启动 PHP ${p.version} 失败: ${e}`); }
     finally { busyIds.value.delete(p.id); }
   }
 }
@@ -313,7 +364,7 @@ async function stopAllPhp() {
   pauseAutoRefresh();
   for (const p of phpServices.value.filter(isRunning)) {
     busyIds.value.add(p.id);
-    try { services.value = await invoke("stop_service", { id: p.id }); } catch {}
+    try { services.value = await invokeWithTimeout("stop_service", { id: p.id }); } catch (e) { showError(`停止 PHP ${p.version} 失败: ${e}`); }
     finally { busyIds.value.delete(p.id); }
   }
 }
@@ -352,11 +403,13 @@ onMounted(async () => {
     loadAppStats();  // 顺带刷新本应用内存/运行时长
   }, 5000);
   logTimer = window.setInterval(loadRecentLogs, 2000);
+  uptimeTimer = window.setInterval(() => { localUptime.value++; }, 1000);
 });
 
 onUnmounted(() => {
   if (svcTimer) clearInterval(svcTimer);
   if (logTimer) clearInterval(logTimer);
+  if (uptimeTimer) clearInterval(uptimeTimer);
   if (unlistenServicesChanged) unlistenServicesChanged();
 });
 </script>
@@ -364,8 +417,7 @@ onUnmounted(() => {
 <template>
   <div class="max-w-[1100px]">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-3">
-      <h1 class="text-base font-semibold">仪表板</h1>
+    <div class="flex items-center justify-end mb-3">
       <div class="flex gap-2">
         <button class="btn btn-success btn-sm" :disabled="batchBusy" @click="startAll">{{ batchBusy ? "启动中..." : "全部启动" }}</button>
         <button class="btn btn-danger btn-sm" :disabled="batchBusy" @click="stopAll">{{ batchBusy ? "停止中..." : "全部停止" }}</button>
@@ -421,14 +473,8 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-      <!-- Overview Bar -->
-      <div class="flex items-center gap-6 mb-4 px-1 text-[13px]" style="color: var(--text-secondary)">
-        <div>运行中 <span class="font-semibold" style="color: var(--color-success-light)">{{ runningCount }}</span><span class="opacity-60">/{{ totalCount }}</span></div>
-        <div>已停止 <span class="font-semibold" style="color: var(--text-primary)">{{ stoppedCount }}</span></div>
-      </div>
-
-      <!-- Main service cards (4 columns) -->
-      <div class="grid grid-cols-4 gap-3 mb-4">
+      <!-- Main service cards (2 columns) -->
+      <div class="grid grid-cols-2 gap-3 mb-4">
         <div v-for="g in mainKindGroups" :key="g.kind"
              class="svc-card"
              :class="{ 'is-running': !!g.running }">
@@ -460,37 +506,27 @@ onUnmounted(() => {
                     : { background: 'var(--color-gray-light)' }"></span>
           </div>
 
-          <!-- Status text：选中==运行 时只写"运行中"；不一致时明确提示实际运行版本 -->
-          <div class="text-[13px] mb-3 transition-colors"
-               :style="{ color: g.running && g.running.id === g.active.id ? 'var(--color-success-light)' : 'var(--text-muted)' }">
-            <template v-if="isBusy(g.active.id)">操作中...</template>
-            <template v-else-if="!g.running">已停止</template>
-            <template v-else-if="g.running.id === g.active.id">
-              运行中<span v-if="g.running.status.memory_mb != null" class="opacity-70"> · {{ g.running.status.memory_mb }} MB</span>
-            </template>
-            <template v-else>
-              运行中：v{{ g.running.version }}<span v-if="g.running.status.memory_mb != null" class="opacity-70"> · {{ g.running.status.memory_mb }} MB</span>
-            </template>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex gap-1.5">
-            <template v-if="isBusy(g.active.id)">
-              <button class="btn btn-secondary btn-sm flex-1" disabled>...</button>
-            </template>
-            <template v-else-if="!g.running">
-              <!-- 没运行 → 启动选中版本 -->
-              <button class="btn btn-success btn-sm flex-1" @click="startService(g.active.id)">启动</button>
-            </template>
-            <template v-else-if="g.running.id !== g.active.id">
-              <!-- 有运行，但不是选中的 → 显式切换按钮 -->
-              <button class="btn btn-primary btn-sm flex-1" @click="switchToActive(g.kind, g)">切换到 v{{ g.active.version }}</button>
-            </template>
-            <template v-else>
-              <!-- 选中 = 运行 → 停止/重启 -->
-              <button class="btn btn-danger btn-sm flex-1" @click="stopService(g.active.id)">停止</button>
-              <button class="btn btn-secondary btn-sm" @click="restartService(g.active.id)" title="重启">⟳</button>
-            </template>
+          <!-- Status + Actions (one row) -->
+          <div class="flex items-center justify-between">
+            <div class="text-[13px] transition-colors"
+                 :style="{ color: g.running && g.running.id === g.active.id ? 'var(--color-success-light)' : 'var(--text-muted)' }">
+              <template v-if="isBusy(g.active.id)">操作中...</template>
+              <template v-else-if="!g.running">已停止</template>
+              <template v-else-if="g.running.id === g.active.id">运行中</template>
+              <template v-else>v{{ g.running.version }} 运行中</template>
+            </div>
+            <div class="flex items-center gap-2">
+              <button v-if="g.running && g.running.id === g.active.id && !isBusy(g.active.id)"
+                      class="svc-action-btn" title="重启"
+                      @click="restartService(g.active.id)">⟳</button>
+              <button v-if="g.running && g.running.id !== g.active.id && !isBusy(g.active.id)"
+                      class="btn btn-primary btn-xs" @click="switchToActive(g.kind, g)">切换</button>
+              <div class="svc-toggle"
+                   :class="{ active: g.running && g.running.id === g.active.id, disabled: isBusy(g.active.id) }"
+                   @click="g.running && g.running.id === g.active.id ? stopService(g.active.id) : startService(g.active.id)">
+                <span class="svc-toggle-slider"></span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -564,15 +600,16 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3">
-          <div v-for="p in phpServices" :key="p.id" class="flex items-center gap-1.5">
+        <div class="flex flex-wrap items-center gap-1.5 mb-3">
+          <div v-for="p in phpServices" :key="p.id"
+               class="php-chip"
+               :class="{ 'is-running': isRunning(p) }">
             <span class="w-1.5 h-1.5 rounded-full shrink-0"
                   :style="isRunning(p)
                     ? { background: 'var(--color-success-light)', boxShadow: '0 0 4px var(--color-success-light)' }
                     : { background: 'var(--color-gray-light)' }"></span>
-            <span class="text-[13px] font-mono">{{ p.version }}{{ p.variant ? ' '+p.variant : '' }}</span>
-            <span v-if="isRunning(p) && p.status.memory_mb != null"
-                  class="text-[11px] opacity-60">{{ p.status.memory_mb }}M</span>
+            <span class="font-mono">{{ p.version }}{{ p.variant ? ' '+p.variant : '' }}</span>
+            <span class="opacity-50 text-[9px]">{{ originShort(p) }}</span>
           </div>
         </div>
         <div class="flex gap-2">
@@ -604,9 +641,9 @@ onUnmounted(() => {
 
       <!-- 应用自身状态条 -->
       <div v-if="appStats" class="flex items-center gap-3 mt-2 text-[11px]" style="color: var(--text-muted)">
-        <span>RustStudy · PID {{ appStats.pid }}</span>
+        <span>{{ APP_NAME }} · PID {{ appStats.pid }}</span>
         <span v-if="appStats.memory_mb != null">· 内存 {{ appStats.memory_mb }} MB</span>
-        <span>· 运行 {{ fmtUptime(appStats.uptime_secs) }}</span>
+        <span>· 运行 {{ fmtUptime(localUptime) }}</span>
       </div>
     </template>
 
@@ -631,6 +668,62 @@ onUnmounted(() => {
 .svc-card.is-running {
   border-color: rgba(63, 185, 80, 0.25);
 }
+
+/* Service toggle switch */
+.svc-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.svc-toggle.disabled { cursor: not-allowed; opacity: 0.5; pointer-events: none; }
+.svc-toggle-slider {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--color-gray-light);
+  transition: background 250ms ease;
+}
+.svc-toggle-slider::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.svc-toggle.active .svc-toggle-slider {
+  background: var(--color-success);
+}
+.svc-toggle.active .svc-toggle-slider::after {
+  transform: translateX(20px);
+}
+
+/* Restart action button */
+.svc-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 150ms ease;
+}
+.svc-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
 /* 多版本下拉：小 pill，明显是个能点的东西 */
 .version-sel {
   font-size: 12px;
@@ -652,6 +745,25 @@ onUnmounted(() => {
 .version-sel:hover { border-color: var(--text-muted); background: var(--bg-hover); }
 .version-sel:focus { border-color: var(--color-blue-light); }
 .version-sel option { background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; }
+
+/* PHP version chips */
+.php-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+.php-chip.is-running {
+  background: rgba(74, 222, 128, 0.08);
+  border-color: rgba(74, 222, 128, 0.25);
+  color: var(--color-success-light);
+}
 
 /* 更新提醒横条 */
 .update-banner {

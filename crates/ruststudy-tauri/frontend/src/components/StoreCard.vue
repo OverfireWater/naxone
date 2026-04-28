@@ -27,7 +27,7 @@ interface PackageEntry {
 
 const props = defineProps<{
   pkg: PackageEntry;
-  installedVersions: string[]; // all versions of this package that are installed
+  installedVersions: string[];
 }>();
 
 type Phase = "idle" | "starting" | "downloading" | "extracting" | "done" | "failed";
@@ -35,7 +35,6 @@ type Phase = "idle" | "starting" | "downloading" | "extracting" | "done" | "fail
 const selectedVersion = ref<string>(props.pkg.versions[0]?.version || "");
 const phase = ref<Phase>("idle");
 const progress = ref(0);
-/// 已下载 MB 数。服务器不返回 Content-Length 时百分比算不出来，用这个兜底展示"数字在涨"。
 const downloadedMB = ref<number | null>(null);
 const errorMsg = ref("");
 const confirmUninstall = ref(false);
@@ -43,24 +42,13 @@ const uninstalling = ref(false);
 
 let unlisten: UnlistenFn | null = null;
 
-// If the currently selected version is installed, display the "installed" state.
-const isSelectedInstalled = computed(() =>
-  props.installedVersions.includes(selectedVersion.value)
-);
-
-const currentVersion = computed(() =>
-  props.pkg.versions.find(v => v.version === selectedVersion.value)
-);
-
+const isSelectedInstalled = computed(() => props.installedVersions.includes(selectedVersion.value));
+const currentVersion = computed(() => props.pkg.versions.find(v => v.version === selectedVersion.value));
 const isBusy = computed(() => phase.value === "starting" || phase.value === "downloading" || phase.value === "extracting");
 
 async function doInstall() {
-  if (isBusy.value) return;
-  if (isSelectedInstalled.value) return;
+  if (isBusy.value || isSelectedInstalled.value) return;
 
-  // Nginx/Apache 商店侧限装 1 个：发现已有其他商店版本 → 确认后先卸再装
-  // installedVersions 包含所有来源（含 PHPStudy），但 uninstall_package 后端会拒绝
-  // 非 Store 源，所以不会误删 PHPStudy 的；这里我们只为不同版本走替换流程
   const singleOnly = props.pkg.name === "nginx" || props.pkg.name === "apache";
   if (singleOnly) {
     const other = props.installedVersions.find(v => v !== selectedVersion.value);
@@ -73,7 +61,6 @@ async function doInstall() {
       try {
         await invoke("uninstall_package", { name: props.pkg.name, version: other });
       } catch (e) {
-        // 卸载失败（比如那个版本是 PHPStudy 的 → 后端返回"不能卸载 PHPStudy 自带"）
         phase.value = "failed";
         errorMsg.value = `无法替换已有版本：${e}`;
         return;
@@ -86,10 +73,7 @@ async function doInstall() {
   downloadedMB.value = null;
   errorMsg.value = "";
   try {
-    await invoke("install_package", {
-      name: props.pkg.name,
-      version: selectedVersion.value,
-    });
+    await invoke("install_package", { name: props.pkg.name, version: selectedVersion.value });
   } catch (e) {
     phase.value = "failed";
     errorMsg.value = String(e);
@@ -98,7 +82,6 @@ async function doInstall() {
 
 function handleEvent(ev: any) {
   const p = ev.payload;
-  // Only react to events for THIS package + THIS version
   if (p.name !== props.pkg.name || p.version !== selectedVersion.value) return;
   switch (p.phase) {
     case "started":
@@ -109,9 +92,7 @@ function handleEvent(ev: any) {
     case "progress":
       phase.value = "downloading";
       progress.value = Math.round(p.pct || 0);
-      if (typeof p.downloaded === "number") {
-        downloadedMB.value = p.downloaded / 1024 / 1024;
-      }
+      if (typeof p.downloaded === "number") downloadedMB.value = p.downloaded / 1024 / 1024;
       break;
     case "extracting":
       phase.value = "extracting";
@@ -120,7 +101,6 @@ function handleEvent(ev: any) {
     case "done":
       phase.value = "done";
       progress.value = 100;
-      // Let parent refresh installed list
       emit("installed", { name: props.pkg.name, version: p.version });
       break;
     case "failed":
@@ -136,15 +116,11 @@ const emit = defineEmits<{
 }>();
 
 async function doUninstall() {
-  if (uninstalling.value) return;
-  if (!isSelectedInstalled.value) return;
+  if (uninstalling.value || !isSelectedInstalled.value) return;
   uninstalling.value = true;
   errorMsg.value = "";
   try {
-    await invoke("uninstall_package", {
-      name: props.pkg.name,
-      version: selectedVersion.value,
-    });
+    await invoke("uninstall_package", { name: props.pkg.name, version: selectedVersion.value });
     confirmUninstall.value = false;
     phase.value = "idle";
     progress.value = 0;
@@ -166,7 +142,6 @@ onUnmounted(() => {
   if (unlisten) unlisten();
 });
 
-// Reset UI state when user switches to a different version dropdown selection
 watch(selectedVersion, () => {
   if (phase.value === "done" || phase.value === "failed") {
     phase.value = "idle";
@@ -179,7 +154,6 @@ watch(selectedVersion, () => {
 
 <template>
   <div class="store-card">
-    <!-- Header: brand icon + name + description -->
     <div class="flex items-start gap-3 mb-3">
       <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 text-white font-bold text-lg"
            :style="{ background: pkg.brand_color, boxShadow: `0 2px 8px ${pkg.brand_color}55` }">
@@ -188,8 +162,7 @@ watch(selectedVersion, () => {
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-1.5">
           <div class="text-sm font-semibold truncate">{{ pkg.display_name }}</div>
-          <span v-if="installedVersions.length > 0"
-                class="text-[10px] px-1.5 py-px rounded font-semibold shrink-0"
+          <span v-if="installedVersions.length > 0" class="text-[10px] px-1.5 py-px rounded font-semibold shrink-0"
                 style="background: rgba(34,197,94,0.18); color: var(--color-success-light)">
             {{ installedVersions.length }} 个版本已装
           </span>
@@ -200,7 +173,6 @@ watch(selectedVersion, () => {
       </div>
     </div>
 
-    <!-- Version + size row -->
     <div class="flex items-center gap-2 mb-3">
       <select class="input sel flex-1" v-model="selectedVersion" :disabled="isBusy">
         <option v-for="v in pkg.versions" :key="v.version" :value="v.version">
@@ -208,39 +180,28 @@ watch(selectedVersion, () => {
           <template v-if="installedVersions.includes(v.version)"> · 已安装</template>
         </option>
       </select>
-      <span v-if="currentVersion?.size_mb" class="text-[11px] font-mono shrink-0"
-            style="color: var(--text-muted)">~{{ currentVersion.size_mb }}MB</span>
+      <span v-if="currentVersion?.size_mb" class="text-[11px] font-mono shrink-0" style="color: var(--text-muted)">~{{ currentVersion.size_mb }}MB</span>
     </div>
 
-    <!-- Action area: button | progress | installed | failed -->
     <div class="store-action">
-      <!-- Installed → badge + uninstall -->
-      <div v-if="isSelectedInstalled && phase !== 'downloading' && phase !== 'extracting' && phase !== 'starting'"
-           class="installed-wrap">
+      <div v-if="isSelectedInstalled && phase !== 'downloading' && phase !== 'extracting' && phase !== 'starting'" class="installed-wrap">
         <template v-if="confirmUninstall">
-          <button class="btn btn-danger btn-sm flex-1 flex items-center justify-center gap-1"
-                  :disabled="uninstalling"
-                  @click="doUninstall">
+          <button class="btn btn-danger btn-sm flex-1 flex items-center justify-center gap-1" :disabled="uninstalling" @click="doUninstall">
             {{ uninstalling ? "卸载中..." : "确认卸载" }}
           </button>
-          <button class="btn btn-secondary btn-sm !px-2"
-                  :disabled="uninstalling"
-                  @click="confirmUninstall = false">×</button>
+          <button class="btn btn-secondary btn-sm !px-2" :disabled="uninstalling" @click="confirmUninstall = false">×</button>
         </template>
         <template v-else>
           <div class="installed-badge flex-1">
             <CheckCircle2 :size="14" />
             <span>已安装 v{{ selectedVersion }}</span>
           </div>
-          <button class="btn btn-secondary btn-sm !px-2 hover:!text-red-400 transition-colors"
-                  title="卸载"
-                  @click="confirmUninstall = true">
+          <button class="btn btn-secondary btn-sm !px-2 hover:!text-red-400 transition-colors" title="卸载" @click="confirmUninstall = true">
             <Trash2 :size="13" />
           </button>
         </template>
       </div>
 
-      <!-- Progress bar (downloading / extracting / starting / just-done) -->
       <div v-else-if="isBusy || phase === 'done'" class="progress-wrap">
         <div class="progress-bar">
           <div class="progress-fill" :style="{ width: progress + '%' }"></div>
@@ -255,7 +216,6 @@ watch(selectedVersion, () => {
         </span>
       </div>
 
-      <!-- Failed -->
       <div v-else-if="phase === 'failed'" class="failed-wrap">
         <div class="failed-msg" :title="errorMsg">
           <AlertCircle :size="12" />
@@ -264,9 +224,7 @@ watch(selectedVersion, () => {
         <button class="btn btn-secondary btn-sm" @click="doInstall">重试</button>
       </div>
 
-      <!-- Idle → Install button -->
-      <button v-else class="btn btn-success btn-sm w-full flex items-center justify-center gap-1.5"
-              @click="doInstall">
+      <button v-else class="btn btn-success btn-sm w-full flex items-center justify-center gap-1.5" @click="doInstall">
         <Download :size="13" />安装
       </button>
     </div>
@@ -358,9 +316,12 @@ watch(selectedVersion, () => {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 11px;
-  color: var(--color-danger);
-  padding: 0 4px;
+  color: var(--color-danger-light);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 6px 8px;
 }
 </style>

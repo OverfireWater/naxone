@@ -66,7 +66,7 @@ struct ZipInfo {
 /// down or the JSON can't be parsed.
 pub async fn fetch() -> Result<Vec<PackageVersion>, String> {
     let client = reqwest::Client::builder()
-        .user_agent("RustStudy/0.1.0")
+        .user_agent("RustStudy/0.2.1")
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| format!("HTTP 客户端初始化失败: {}", e))?;

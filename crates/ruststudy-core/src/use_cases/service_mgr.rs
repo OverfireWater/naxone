@@ -130,7 +130,12 @@ impl ServiceManager {
         if is_web_server {
             for svc in all_services.iter_mut() {
                 if svc.kind == ServiceKind::Php && !svc.status.is_running() {
-                    let _ = self.start_service(svc).await;
+                    self.start_service(svc).await.map_err(|e| {
+                        RustStudyError::Process(format!(
+                            "联动启动 PHP-CGI {} 失败: {}",
+                            svc.version, e
+                        ))
+                    })?;
                 }
             }
         }

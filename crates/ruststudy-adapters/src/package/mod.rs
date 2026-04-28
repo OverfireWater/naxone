@@ -6,3 +6,4 @@ pub mod proxy;
 pub mod scanner;
 pub mod sources;
 pub mod standalone;
+pub mod system_scanner;

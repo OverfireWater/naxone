@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { X, Trash2, FolderOpen, RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Info, Bug } from "lucide-vue-next";
+import { X, Trash2, FolderOpen, RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, Copy } from "lucide-vue-next";
+import { toast } from "../composables/useToast";
 
 interface LogEntry {
   id: number;
@@ -17,17 +18,29 @@ const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const logs = ref<LogEntry[]>([]);
-const levelFilter = ref<string>("");       // "", "warn", "error", "info", "debug"
-const categoryFilter = ref<string>("");    // "", "service", "vhost", ...
+const levelFilter = ref<string>("");
+const categoryFilter = ref<string>("");
 const expandedIds = ref<Set<number>>(new Set());
 
 let timer: number | null = null;
 let lastId = 0;
+const INVOKE_TIMEOUT_MS = 10000;
+
+async function invokeWithTimeout<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  timeoutMs = INVOKE_TIMEOUT_MS,
+): Promise<T> {
+  const timeout = new Promise<never>((_, reject) => {
+    window.setTimeout(() => reject(new Error(`${command} 超时`)), timeoutMs);
+  });
+  return await Promise.race([invoke<T>(command, args), timeout]);
+}
 
 async function loadLogs(fresh = false) {
   try {
     const since = fresh ? undefined : lastId;
-    const fetched: LogEntry[] = await invoke("get_logs", {
+    const fetched: LogEntry[] = await invokeWithTimeout("get_logs", {
       limit: 200,
       level: levelFilter.value || null,
       category: categoryFilter.value || null,
@@ -36,28 +49,54 @@ async function loadLogs(fresh = false) {
     if (fresh) {
       logs.value = fetched;
     } else if (fetched.length > 0) {
-      // Prepend new entries
       logs.value = [...fetched, ...logs.value].slice(0, 500);
     }
     if (fetched.length > 0) {
       lastId = Math.max(lastId, fetched[0].id);
     }
-  } catch {}
+  } catch (e) {
+    toast.warn(`日志读取失败: ${e}`);
+  }
 }
 
 async function clearLogs() {
-  await invoke("clear_logs");
-  logs.value = [];
-  lastId = 0;
+  try {
+    await invokeWithTimeout("clear_logs");
+    logs.value = [];
+    lastId = 0;
+  } catch (e) {
+    toast.error(`清空日志失败: ${e}`);
+  }
 }
 
 async function openLogDir() {
-  try { await invoke("open_log_dir"); } catch {}
+  try {
+    await invokeWithTimeout("open_log_dir");
+  } catch (e) {
+    toast.error(`打开日志目录失败: ${e}`);
+  }
 }
 
 function toggleExpand(id: number) {
   if (expandedIds.value.has(id)) expandedIds.value.delete(id);
   else expandedIds.value.add(id);
+}
+
+async function copyLog(log: LogEntry) {
+  const text = log.details
+    ? `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.message}\n${log.details}`
+    : `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.message}`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+  toast.success("已复制到剪贴板");
 }
 
 const levelIcon = computed(() => ({
@@ -82,7 +121,6 @@ function categoryLabel(cat: string): string {
   return ({ service: "服务", vhost: "站点", config: "配置", extension: "扩展", settings: "设置", system: "系统" } as Record<string, string>)[cat] || cat;
 }
 
-// Reload when filters change
 watch([levelFilter, categoryFilter], () => {
   lastId = 0;
   loadLogs(true);
@@ -106,11 +144,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 
 <template>
   <Transition name="drawer">
-    <div v-if="open" class="fixed inset-0 z-[90]" @click.self="emit('close')">
-      <div class="absolute inset-0" style="background: rgba(0,0,0,0.3)"></div>
+    <div v-if="open" class="fixed inset-0 z-[90]">
+      <div class="absolute inset-0" style="background: rgba(0,0,0,0.3)" @click="emit('close')"></div>
       <div class="absolute top-0 right-0 h-full flex flex-col shadow-2xl"
+           @click.stop
            style="width: 480px; background: var(--bg-secondary); border-left: 1px solid var(--border-color)">
-        <!-- Header -->
         <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--border-color)">
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold">活动日志</span>
@@ -121,7 +159,6 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
           </button>
         </div>
 
-        <!-- Toolbar -->
         <div class="flex items-center gap-2 px-4 py-2 border-b" style="border-color: var(--border-color)">
           <select class="input sel" style="width: 110px; padding: 4px 24px 4px 8px; font-size: 12px" v-model="levelFilter">
             <option value="">全部级别</option>
@@ -145,11 +182,10 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
           <button class="btn btn-secondary btn-sm !px-2" @click="clearLogs" title="清空"><Trash2 :size="13" /></button>
         </div>
 
-        <!-- Log list -->
         <div class="flex-1 overflow-y-auto">
           <div v-if="logs.length === 0" class="text-center py-12 text-[13px]" style="color: var(--text-muted)">暂无日志</div>
           <div v-for="log in logs" :key="log.id"
-               class="px-4 py-2 border-b cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
+               class="px-4 py-2 border-b cursor-pointer transition-colors hover:bg-[var(--bg-hover)] group"
                :style="{ borderColor: 'var(--border-color)' }"
                @click="toggleExpand(log.id)">
             <div class="flex items-start gap-2.5">
@@ -159,7 +195,15 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
                   <span class="text-[11px] font-mono" style="color: var(--text-muted)">{{ log.timestamp.slice(11, 19) }}</span>
                   <span class="text-[10px] px-1.5 py-0.5 rounded" style="background: var(--bg-tertiary); color: var(--text-muted)">{{ categoryLabel(log.category) }}</span>
                 </div>
-                <div class="text-[13px] mt-0.5" style="color: var(--text-primary)">{{ log.message }}</div>
+                <div class="text-[13px] mt-0.5 flex items-start justify-between gap-2">
+                  <span style="color: var(--text-primary)">{{ log.message }}</span>
+                  <button class="shrink-0 p-1 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                          style="color: var(--text-muted); background: transparent; border: none; cursor: pointer"
+                          title="复制"
+                          @click.stop="copyLog(log)">
+                    <Copy :size="12" />
+                  </button>
+                </div>
                 <pre v-if="expandedIds.has(log.id) && log.details" class="text-[11px] mt-2 p-2 rounded whitespace-pre-wrap font-mono"
                      style="background: var(--bg-primary); color: var(--text-secondary); max-height: 200px; overflow-y: auto">{{ log.details }}</pre>
               </div>

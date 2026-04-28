@@ -27,11 +27,18 @@ maybe_redirect:
 
 use_d:
   StrCpy $INSTDIR "D:\RustStudy"
-  Goto skip_redirect
+  Goto set_outdir
 
 use_c:
   StrCpy $INSTDIR "C:\RustStudy"
-  Goto skip_redirect
+  Goto set_outdir
+
+set_outdir:
+  ; Tauri calls SetOutPath $INSTDIR BEFORE this hook runs, so changing
+  ; $INSTDIR alone would leave $OUTDIR pointing at the old path.  This
+  ; causes files to land in one directory while shortcuts and registry
+  ; entries point at another.  Update $OUTDIR to match the new $INSTDIR.
+  SetOutPath $INSTDIR
 
 skip_redirect:
 !macroend

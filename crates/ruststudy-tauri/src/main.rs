@@ -3,7 +3,9 @@
 mod commands;
 mod state;
 
+use crate::commands::logger::push_log;
 use state::AppState;
+use ruststudy_core::domain::log::LogLevel;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -20,6 +22,15 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 用户再次点击 exe 或快捷方式 → 激活已有窗口
+            let windows = app.webview_windows();
+            if let Some(win) = windows.values().next() {
+                let _ = win.set_focus();
+                let _ = win.unminimize();
+                let _ = win.show();
+            }
+        }))
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::service::get_services,
@@ -68,6 +79,10 @@ fn main() {
             commands::utils::read_log_tail,
             commands::utils::find_and_read_log,
             commands::utils::get_startup_errors,
+            commands::hosts::get_hosts_file_path,
+            commands::hosts::get_hosts_text,
+            commands::hosts::save_hosts_text,
+            commands::hosts::save_hosts_text_elevated,
             commands::updater::check_for_updates,
             commands::logger::get_logs,
             commands::logger::clear_logs,
@@ -80,6 +95,13 @@ fn main() {
             commands::package::uninstall_package,
         ])
         .setup(|app| {
+            // Dev 模式窗口标题加标识
+            if cfg!(debug_assertions) {
+                if let Some(win) = app.webview_windows().values().next() {
+                    let _ = win.set_title("RustStudy (Development)");
+                }
+            }
+
             // Start log writer background task
             {
                 let state = app.state::<AppState>();
@@ -187,6 +209,71 @@ fn main() {
                         }
                     }
                     "quit" => {
+                        let state = app.state::<AppState>();
+                        let app_state = std::sync::Arc::new(state.inner().clone_shallow());
+                        tauri::async_runtime::block_on(async move {
+                            let stop_on_exit = app_state.config.read().await.general.stop_services_on_exit;
+                            if stop_on_exit {
+                                push_log(
+                                    &app_state,
+                                    LogLevel::Info,
+                                    "system",
+                                    "退出应用：开始停止全部服务",
+                                    None,
+                                    None,
+                                )
+                                .await;
+
+                                let mut working = { app_state.services.read().await.clone() };
+                                let mut errors = Vec::new();
+                                for svc in working.iter_mut() {
+                                    if let Err(e) = app_state.service_manager.stop_service(svc).await {
+                                        let msg = format!("{} {} 停止失败: {}", svc.kind.display_name(), svc.version, e);
+                                        errors.push(msg.clone());
+                                        push_log(
+                                            &app_state,
+                                            LogLevel::Error,
+                                            "service",
+                                            format!("{} {} 停止失败", svc.kind.display_name(), svc.version),
+                                            Some(e.to_string()),
+                                            None,
+                                        )
+                                        .await;
+                                    }
+                                }
+
+                                {
+                                    let mut services = app_state.services.write().await;
+                                    for svc in services.iter_mut() {
+                                        if let Some(updated) = working.iter().find(|w| w.id() == svc.id()) {
+                                            svc.status = updated.status.clone();
+                                        }
+                                    }
+                                }
+
+                                if errors.is_empty() {
+                                    push_log(
+                                        &app_state,
+                                        LogLevel::Success,
+                                        "system",
+                                        "退出应用：全部服务已停止",
+                                        None,
+                                        None,
+                                    )
+                                    .await;
+                                } else {
+                                    push_log(
+                                        &app_state,
+                                        LogLevel::Warn,
+                                        "system",
+                                        "退出应用：部分服务停止失败",
+                                        Some(errors.join("\n")),
+                                        None,
+                                    )
+                                    .await;
+                                }
+                            }
+                        });
                         app.exit(0);
                     }
                     _ => {}

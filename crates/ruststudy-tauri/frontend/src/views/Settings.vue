@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useRouter } from "vue-router";
 import { toast } from "../composables/useToast";
 
 interface ConfigDto {
   phpstudy_path: string; www_root: string; active_web_server: string;
   auto_start: string[]; mysql_port: number; redis_port: number;
   log_dir: string; log_retention_days: number;
+  stop_services_on_exit: boolean;
 }
 
-const config = ref<ConfigDto>({ phpstudy_path: "", www_root: "", active_web_server: "nginx", auto_start: [], mysql_port: 3306, redis_port: 6379, log_dir: "", log_retention_days: 7 });
+const config = ref<ConfigDto>({ phpstudy_path: "", www_root: "", active_web_server: "nginx", auto_start: [], mysql_port: 3306, redis_port: 6379, log_dir: "", log_retention_days: 7, stop_services_on_exit: false });
 const busy = ref(false);
 const saved = ref(false);
+const router = useRouter();
 
 // Theme
 const themeMode = ref(localStorage.getItem("ruststudy-theme") || "dark");
@@ -28,8 +31,6 @@ async function loadConfig() { try { config.value = await invoke("get_config"); }
 async function saveSettings() {
   busy.value = true;
   try {
-    // WWW 根目录 UI 已移除，保存前从 phpstudy_path 推：默认 {phpstudy_path}\WWW
-    // 没 phpstudy_path 时保留现有值；现有值也没就留空（让后端容忍）
     const ps = (config.value.phpstudy_path || "").replace(/\\/g, "/").replace(/\/+$/, "");
     if (ps && !config.value.www_root) {
       config.value.www_root = ps + "/WWW";
@@ -136,6 +137,23 @@ onMounted(() => { loadConfig(); });
           <span class="capitalize">{{ svc }}</span>
         </label>
       </div>
+    </div>
+
+    <!-- Exit behavior -->
+    <div class="card mb-3">
+      <h2 class="text-sm font-medium text-content-secondary mb-3">退出行为</h2>
+      <label class="flex items-center gap-2 text-sm cursor-pointer mb-2">
+        <input type="checkbox" v-model="config.stop_services_on_exit" class="accent-accent-success w-4 h-4" />
+        <span>退出应用时自动停止所有服务</span>
+      </label>
+      <p class="text-xs text-content-muted">仅托盘菜单“退出”生效；点窗口右上角关闭只是最小化到托盘。</p>
+    </div>
+
+    <!-- Hosts Tools -->
+    <div class="card mb-3">
+      <h2 class="text-sm font-medium text-content-secondary mb-3">Hosts 工具</h2>
+      <p class="text-xs text-content-muted mb-3">已整合到“服务配置”页的 Hosts 标签中。</p>
+      <button class="btn btn-secondary btn-sm" @click="router.push('/config')">前往服务配置</button>
     </div>
 
     <!-- Log Settings -->

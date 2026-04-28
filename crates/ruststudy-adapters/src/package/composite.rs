@@ -19,6 +19,7 @@ use ruststudy_core::domain::service::{ServiceInstance, ServiceOrigin};
 
 use super::scanner::PhpStudyScanner;
 use super::standalone::StandaloneScanner;
+use super::system_scanner::SystemScanner;
 
 pub struct CompositeScanner;
 
@@ -65,6 +66,12 @@ impl CompositeScanner {
         // --- 3) Manual extra_install_paths + legacy %APPDATA%/Packages ---
         let standalone = StandaloneScanner::scan(extras, legacy_packages_root);
         for inst in standalone {
+            push_dedup(&mut out, inst);
+        }
+
+        // --- 4) System PATH + common install directories ---
+        let system = SystemScanner::scan();
+        for inst in system {
             push_dedup(&mut out, inst);
         }
 

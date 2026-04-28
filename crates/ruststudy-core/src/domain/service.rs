@@ -69,6 +69,8 @@ pub enum ServiceOrigin {
     Store,
     /// Pointed at by an extra_install_paths entry
     Manual,
+    /// Auto-discovered from system PATH or common install directories
+    System,
 }
 
 impl Default for ServiceOrigin {

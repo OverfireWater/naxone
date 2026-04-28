@@ -43,6 +43,8 @@ pub struct WindowsProcessManager {
     netstat_cache: Arc<Mutex<Option<(Instant, HashMap<u16, u32>)>>>,
     /// 最近一次 tasklist 结果（pid → memory_mb），给所有服务共享
     tasklist_cache: Arc<Mutex<Option<(Instant, HashMap<u32, u64>)>>>,
+    /// PHP auto-restart: service_id → true while watchdog should keep it alive
+    auto_restart: Arc<RwLock<HashMap<String, bool>>>,
 }
 
 impl WindowsProcessManager {
@@ -52,6 +54,7 @@ impl WindowsProcessManager {
             status_cache: Arc::new(RwLock::new(HashMap::new())),
             netstat_cache: Arc::new(Mutex::new(None)),
             tasklist_cache: Arc::new(Mutex::new(None)),
+            auto_restart: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -78,6 +81,93 @@ impl WindowsProcessManager {
         self.status_cache.write().await.remove(instance_id);
         // netstat 快照也过期掉，下次刷新重新扫
         *self.netstat_cache.lock().await = None;
+    }
+
+    /// Spawn a background task that monitors a PHP process and restarts it if it dies.
+    async fn spawn_watchdog(&self, instance: &ServiceInstance) {
+        let id = instance.id();
+        self.auto_restart.write().await.insert(id, true);
+
+        let processes = self.processes.clone();
+        let auto_restart = self.auto_restart.clone();
+        let status_cache = self.status_cache.clone();
+        let netstat_cache = self.netstat_cache.clone();
+        let inst = instance.clone();
+
+        tokio::spawn(async move {
+            let mut crashes = 0u32;
+            loop {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                // User stopped the service → exit watchdog
+                if !auto_restart
+                    .read()
+                    .await
+                    .get(&inst.id())
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+
+                // Still alive → reset crash counter
+                if probe_port(inst.port).await {
+                    crashes = 0;
+                    continue;
+                }
+
+                // Process died, try restart
+                crashes += 1;
+                if crashes > 5 {
+                    tracing::warn!(
+                        service = %inst.kind.display_name(),
+                        port = inst.port,
+                        "Auto-restart giving up (5 consecutive crashes)"
+                    );
+                    auto_restart.write().await.remove(&inst.id());
+                    break;
+                }
+
+                tracing::warn!(
+                    service = %inst.kind.display_name(),
+                    port = inst.port,
+                    attempt = crashes,
+                    "Process died, auto-restarting..."
+                );
+
+                if let Ok(mut cmd) = Self::build_start_command(&inst) {
+                    cmd.no_window();
+                    match cmd
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        Ok(child) => {
+                            let new_pid = child.id().unwrap_or(0);
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            processes
+                                .write()
+                                .await
+                                .insert(inst.id(), ProcessInfo { pid: new_pid });
+                            *netstat_cache.lock().await = None;
+                            status_cache.write().await.remove(&inst.id());
+                            tracing::info!(
+                                pid = new_pid,
+                                attempt = crashes,
+                                "PHP auto-restarted"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "PHP restart spawn failed");
+                        }
+                    }
+                }
+
+                // Backoff: 2s → 4s → 8s → 16s → 32s between attempts
+                tokio::time::sleep(Duration::from_secs(2u64.pow(crashes.min(5)))).await;
+            }
+        });
     }
 
     fn build_start_command(instance: &ServiceInstance) -> Result<Command> {
@@ -294,10 +384,18 @@ impl ProcessManager for WindowsProcessManager {
             "Service started"
         );
 
+        // PHP auto-restart watchdog: if php-cgi.exe dies, respawn it automatically
+        if instance.kind == ServiceKind::Php {
+            self.spawn_watchdog(instance).await;
+        }
+
         Ok(pid)
     }
 
     async fn stop(&self, instance: &ServiceInstance) -> Result<()> {
+        // Disable auto-restart before stopping (prevents watchdog from immediately respawning)
+        self.auto_restart.write().await.remove(&instance.id());
+
         // Try graceful stop command first (nginx -s quit, httpd -k stop, redis-cli shutdown)
         if let Some(mut cmd) = Self::build_stop_command(instance) {
             cmd.no_window();
@@ -309,13 +407,10 @@ impl ProcessManager for WindowsProcessManager {
 
             if let Ok(status) = result {
                 if status.success() {
-                    let mut procs = self.processes.write().await;
-                    procs.remove(&instance.id());
                     tracing::info!(
                         service = instance.kind.display_name(),
                         "Service stopped gracefully"
                     );
-                    return Ok(());
                 }
             }
         }

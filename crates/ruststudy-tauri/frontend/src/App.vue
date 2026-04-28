@@ -4,6 +4,7 @@ import { useRouter, useRoute } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LayoutDashboard, Globe, Settings2, Wrench, Store, ChevronLeft, ChevronRight, Minus, Square, X } from "lucide-vue-next";
 import ToastContainer from "./components/ToastContainer.vue";
+import { APP_NAME } from "./composables/useAppInfo";
 
 const router = useRouter();
 const route = useRoute();
@@ -45,35 +46,31 @@ async function close() { await appWindow.close(); }
 
 <template>
   <div class="flex flex-col h-screen">
-    <!-- Titlebar -->
     <div class="flex items-center justify-between h-9 shrink-0 border-b"
-         style="background: var(--bg-titlebar); border-color: var(--border-color)"
-         data-tauri-drag-region>
-      <div class="flex items-center gap-2.5 pl-4" data-tauri-drag-region>
-        <div class="w-5 h-5 bg-gradient-to-br from-indigo-500 to-blue-400 rounded-md flex items-center justify-center">
-          <span class="text-[10px] font-bold text-white leading-none">R</span>
+         style="background: var(--bg-titlebar); border-color: var(--border-color)">
+      <div class="flex-1 h-full flex items-center gap-2.5 pl-4 titlebar-drag" data-tauri-drag-region>
+        <div class="w-5 h-5 bg-gradient-to-br from-indigo-500 to-blue-400 rounded-md flex items-center justify-center titlebar-drag" data-tauri-drag-region>
+          <span class="text-[10px] font-bold text-white leading-none titlebar-drag" data-tauri-drag-region>R</span>
         </div>
-        <span class="text-xs font-medium" style="color: var(--text-muted)" data-tauri-drag-region>RustStudy</span>
+        <span class="text-xs font-medium titlebar-drag" style="color: var(--text-muted)" data-tauri-drag-region>{{ APP_NAME }}</span>
       </div>
-      <div class="flex h-full">
-        <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-[var(--bg-hover)]"
+      <div class="flex h-full titlebar-no-drag">
+        <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-[var(--bg-hover)] titlebar-no-drag"
                 style="color: var(--text-muted)" @click="minimize">
           <Minus :size="14" />
         </button>
-        <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-[var(--bg-hover)]"
+        <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-[var(--bg-hover)] titlebar-no-drag"
                 style="color: var(--text-muted)" @click="toggleMaximize">
           <Square :size="12" />
         </button>
-        <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-red-500 hover:text-white"
+        <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-red-500 hover:text-white titlebar-no-drag"
                 style="color: var(--text-muted)" @click="close">
           <X :size="14" />
         </button>
       </div>
     </div>
 
-    <!-- Body -->
     <div class="flex flex-1 overflow-hidden">
-      <!-- Sidebar -->
       <aside class="flex flex-col shrink-0 transition-all duration-300 ease-in-out border-r"
              :class="collapsed ? 'w-[60px]' : 'w-[220px]'"
              style="background: var(--bg-secondary); border-color: var(--border-color)">
@@ -109,17 +106,16 @@ async function close() { await appWindow.close(); }
              :class="collapsed ? 'justify-center' : ''"
              @click="collapsed = !collapsed">
           <component :is="collapsed ? ChevronRight : ChevronLeft" :size="14" />
-          <span v-if="!collapsed" class="text-[11px] ml-auto" style="color: var(--text-muted)">v0.1.0</span>
+          <span v-if="!collapsed" class="text-[11px] ml-auto" style="color: var(--text-muted)">v0.2.1</span>
         </div>
       </aside>
 
-      <!-- Main -->
       <main class="flex-1 overflow-y-auto px-5 py-4" style="background: var(--bg-primary)">
         <router-view />
       </main>
     </div>
 
-    <!-- Global floating toasts -->
     <ToastContainer />
   </div>
 </template>
+

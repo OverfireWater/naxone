@@ -76,7 +76,7 @@ struct MirrorEntry {
 /// 拉一次镜像 manifest。失败时上游可能不通/被墙，返回 Err 由调用方 fallback。
 pub async fn fetch() -> Result<HashMap<String, Vec<PackageVersion>>, String> {
     let client = reqwest::Client::builder()
-        .user_agent("RustStudy/0.1.0")
+        .user_agent("RustStudy/0.2.1")
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| format!("HTTP 客户端初始化失败: {}", e))?;

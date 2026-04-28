@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { toast } from "../composables/useToast";
 
-type Tab = "nginx" | "mysql" | "redis" | "php";
+type Tab = "nginx" | "mysql" | "redis" | "php" | "hosts";
 const activeTab = ref<Tab>("nginx");
 const busy = ref(false);
 const saved = ref(false);
@@ -105,18 +106,73 @@ async function savePhpIni() {
 
 watch(selectedPhp, () => { loadPhpExts(); loadPhpIni(); });
 
-// ======================== Tab Loading ========================
+// ======================== Hosts ========================
+const hostsText = ref("");
+const hostsOriginal = ref("");
+const hostsPath = ref("");
+
+function hostsDirty(): boolean {
+  return hostsText.value !== hostsOriginal.value;
+}
+
+async function loadHosts() {
+  try {
+    hostsPath.value = await invoke<string>("get_hosts_file_path");
+    const text = await invoke<string>("get_hosts_text");
+    hostsText.value = text;
+    hostsOriginal.value = text;
+  } catch (e) {
+    showError("加载 hosts 失败: " + e);
+  }
+}
+
+async function saveHosts() {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    await invoke("save_hosts_text", { text: hostsText.value });
+    hostsOriginal.value = hostsText.value;
+    showSaved();
+  } catch (e) {
+    const msg = String(e ?? "");
+    if (msg.startsWith("PERMISSION_DENIED:")) {
+      const ok = await confirm("保存 hosts 需要管理员权限，是否继续提权保存？", {
+        title: "需要管理员权限",
+        kind: "warning",
+      });
+      if (!ok) return;
+      await invoke("save_hosts_text_elevated", { text: hostsText.value });
+      hostsOriginal.value = hostsText.value;
+      showSaved();
+    } else {
+      showError("保存 hosts 失败: " + e);
+    }
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function openHostsExternally() {
+  try {
+    const path = hostsPath.value || await invoke<string>("get_hosts_file_path");
+    await invoke("open_file", { path });
+  } catch (e) {
+    showError("打开 hosts 失败: " + e);
+  }
+}
 async function openConfigFile() {
   try {
     if (activeTab.value === "php" && selectedPhp.value) {
       await invoke("open_file", { path: selectedPhp.value.install_path + "/php.ini" });
+    } else if (activeTab.value === "hosts") {
+      const path = hostsPath.value || await invoke<string>("get_hosts_file_path");
+      await invoke("open_file", { path });
     } else {
       const path = await invoke<string>("get_config_file_path", { service: activeTab.value });
       await invoke("open_file", { path });
     }
   } catch (e) { showError("打开失败: " + e); }
 }
-
 const logContent = ref("");
 const showLog = ref(false);
 
@@ -132,6 +188,7 @@ function loadTab() {
   if (activeTab.value === "mysql" && !mysql.value) loadMysql();
   if (activeTab.value === "redis" && !redis.value) loadRedis();
   if (activeTab.value === "php" && phpInstances.value.length === 0) { loadPhpInstances(); }
+  if (activeTab.value === "hosts" && !hostsPath.value) { loadHosts(); }
 }
 watch(activeTab, loadTab);
 onMounted(loadTab);
@@ -146,6 +203,7 @@ onMounted(loadTab);
       <button class="tab" :class="{ active: activeTab === 'mysql' }" @click="activeTab = 'mysql'">MySQL</button>
       <button class="tab" :class="{ active: activeTab === 'redis' }" @click="activeTab = 'redis'">Redis</button>
       <button class="tab" :class="{ active: activeTab === 'php' }" @click="activeTab = 'php'">PHP</button>
+      <button class="tab" :class="{ active: activeTab === 'hosts' }" @click="activeTab = 'hosts'">Hosts</button>
     </div>
 
     <!-- ==================== Nginx ==================== -->
@@ -346,15 +404,33 @@ onMounted(loadTab);
       </div>
     </div>
 
+
+    <!-- ==================== Hosts ==================== -->
+    <div v-if="activeTab === 'hosts'" class="tab-card p-6">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-sm font-medium text-content-secondary">系统 Hosts 文件</div>
+        <button class="btn btn-secondary btn-sm" @click="openHostsExternally">系统编辑器打开</button>
+      </div>
+      <div class="text-xs text-content-muted mb-3 break-all">{{ hostsPath || '加载中...' }}</div>
+      <textarea
+        class="input font-mono text-xs leading-5 w-full min-h-[420px]"
+        style="resize: vertical"
+        v-model="hostsText"
+        placeholder="# 在这里编辑 hosts 内容"
+      ></textarea>
+    </div>
+
     <!-- Unified save bar -->
     <div class="save-bar">
-      <button v-if="(activeTab === 'nginx' && nginx) || (activeTab === 'mysql' && mysql) || (activeTab === 'redis' && redis) || (activeTab === 'php' && phpSubTab === 'settings' && phpIni)"
-              class="btn btn-success btn-sm" :disabled="busy" @click="activeTab === 'nginx' ? saveNginx() : activeTab === 'mysql' ? saveMysql() : activeTab === 'redis' ? saveRedis() : savePhpIni()">
+      <button v-if="(activeTab === 'nginx' && nginx) || (activeTab === 'mysql' && mysql) || (activeTab === 'redis' && redis) || (activeTab === 'php' && phpSubTab === 'settings' && phpIni) || activeTab === 'hosts'"
+              class="btn btn-success btn-sm" :disabled="busy || (activeTab === 'hosts' && !hostsDirty())"
+              @click="activeTab === 'nginx' ? saveNginx() : activeTab === 'mysql' ? saveMysql() : activeTab === 'redis' ? saveRedis() : activeTab === 'php' ? savePhpIni() : saveHosts()">
         {{ busy ? "保存中..." : "保存配置" }}
       </button>
       <button class="btn btn-secondary btn-sm" @click="openConfigFile">打开配置文件</button>
       <button v-if="activeTab === 'nginx' || activeTab === 'mysql'" class="btn btn-secondary btn-sm" @click="viewLog">查看日志</button>
-      <span v-if="saved" class="saved-msg">已保存，重启服务后生效</span>
+      <span v-if="activeTab === 'hosts' && hostsDirty()" class="saved-msg" style="color: var(--color-warn, #f59e0b)">hosts 有未保存修改</span>
+      <span v-else-if="saved" class="saved-msg">已保存，重启服务后生效</span>
     </div>
 
     <!-- Log modal -->

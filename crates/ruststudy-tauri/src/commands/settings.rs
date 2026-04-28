@@ -63,6 +63,8 @@ pub struct ConfigDto {
     pub log_retention_days: u32,
     #[serde(default)]
     pub extra_install_paths: Vec<ExtraInstallPathDto>,
+    #[serde(default)]
+    pub stop_services_on_exit: bool,
 }
 
 fn default_retention() -> u32 {
@@ -97,6 +99,7 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigDto, String>
             .iter()
             .map(ExtraInstallPathDto::from)
             .collect(),
+        stop_services_on_exit: config.general.stop_services_on_exit,
     })
 }
 
@@ -120,6 +123,7 @@ pub async fn save_config(dto: ConfigDto, state: State<'_, AppState>) -> Result<(
         Some(std::path::PathBuf::from(&dto.log_dir))
     };
     config.general.log_retention_days = dto.log_retention_days;
+    config.general.stop_services_on_exit = dto.stop_services_on_exit;
 
     // Persist to file
     let config_path = crate::state::config_path();
