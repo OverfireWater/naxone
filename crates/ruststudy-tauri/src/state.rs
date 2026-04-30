@@ -88,7 +88,17 @@ impl AppState {
         };
 
         let resolved_www_root = resolve_default_www_root();
-        if config.general.www_root == legacy_default_www_root() {
+        // 自动迁移：legacy 默认值；以及 dev 模式下写入但当前已切到 release 的脏值
+        // （路径落在 cargo 的 target\debug 或 target\release 下，绝大多数情况都是
+        // 上一次 cargo tauri dev 留下的，正式安装版应当指向自己同级的 www）
+        let needs_migrate = config.general.www_root == legacy_default_www_root()
+            || is_cargo_target_path(&config.general.www_root);
+        if needs_migrate {
+            tracing::info!(
+                old = %config.general.www_root.display(),
+                new = %resolved_www_root.display(),
+                "迁移过期的 www_root（legacy 或 cargo target 路径）",
+            );
             config.general.www_root = resolved_www_root.clone();
             let _ = config.save(&cfg_path);
         }
@@ -274,6 +284,13 @@ pub fn resolve_log_dir(config: &AppConfig) -> PathBuf {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
         .join("logs")
+}
+
+/// 判断路径是不是落在 cargo 编译产物目录下（`...\target\debug\...` 或
+/// `...\target\release\...`）。用于识别 dev 时写下、正式版启动后已无意义的脏路径。
+fn is_cargo_target_path(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    s.contains("\\target\\debug\\") || s.contains("\\target\\release\\")
 }
 
 fn legacy_default_www_root() -> PathBuf {

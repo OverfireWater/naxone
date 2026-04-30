@@ -34,6 +34,12 @@ pub async fn get_app_stats() -> Result<AppStats, String> {
     })
 }
 
+/// 当前 ruststudy-tauri crate 的版本号（由 Cargo 注入），前端拿来显示侧边栏 v 标签
+#[tauri::command]
+pub fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Open a URL in the default browser using Windows ShellExecute (handles spaces & special chars)
 #[tauri::command]
 pub async fn open_in_browser(url: String) -> Result<(), String> {

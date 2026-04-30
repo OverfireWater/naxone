@@ -3316,7 +3316,7 @@ dependencies = [
 
 [[package]]
 name = "ruststudy-adapters"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3336,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "ruststudy-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "async-trait",
  "serde",
@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "ruststudy-tauri"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "futures-util",

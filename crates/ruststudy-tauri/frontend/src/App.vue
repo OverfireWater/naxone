@@ -2,6 +2,7 @@
 import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { LayoutDashboard, Globe, Settings2, Wrench, Store, ChevronLeft, ChevronRight, Minus, Square, X } from "lucide-vue-next";
 import ToastContainer from "./components/ToastContainer.vue";
 import { APP_NAME } from "./composables/useAppInfo";
@@ -11,6 +12,7 @@ const route = useRoute();
 const collapsed = ref(false);
 const appWindow = getCurrentWindow();
 const isMaximized = ref(false);
+const appVersion = ref("");
 
 function applyTheme(mode: string) {
   if (mode === "auto") {
@@ -21,13 +23,16 @@ function applyTheme(mode: string) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   const saved = localStorage.getItem("ruststudy-theme") || "dark";
   applyTheme(saved);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (localStorage.getItem("ruststudy-theme") === "auto") applyTheme("auto");
   });
   window.addEventListener("theme-change", (e) => applyTheme((e as CustomEvent).detail));
+  try {
+    appVersion.value = await invoke<string>("get_app_version");
+  } catch { /* 拿不到就不显示，不影响主流程 */ }
 });
 
 const menuItems = [
@@ -106,7 +111,7 @@ async function close() { await appWindow.close(); }
              :class="collapsed ? 'justify-center' : ''"
              @click="collapsed = !collapsed">
           <component :is="collapsed ? ChevronRight : ChevronLeft" :size="14" />
-          <span v-if="!collapsed" class="text-[11px] ml-auto" style="color: var(--text-muted)">v0.2.1</span>
+          <span v-if="!collapsed && appVersion" class="text-[11px] ml-auto" style="color: var(--text-muted)">v{{ appVersion }}</span>
         </div>
       </aside>
 

@@ -74,6 +74,7 @@ fn main() {
             commands::service_config::get_redis_config,
             commands::service_config::save_redis_config,
             commands::utils::get_app_stats,
+            commands::utils::get_app_version,
             commands::utils::open_in_browser,
             commands::utils::open_folder,
             commands::utils::open_file,

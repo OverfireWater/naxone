@@ -68,7 +68,7 @@ pub struct Installer {
 impl Installer {
     pub fn new(packages_root: PathBuf) -> Self {
         let mut builder = reqwest::Client::builder()
-            .user_agent("RustStudy/0.2.1")
+            .user_agent(concat!("RustStudy/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(std::time::Duration::from_secs(15))
             // 整体请求超时：避免国外镜像响应极慢时前端永远卡在"连接中"
             .timeout(std::time::Duration::from_secs(600))
