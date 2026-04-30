@@ -151,8 +151,7 @@ naxone/
 │       └── capabilities/               # Tauri 权限配置
 │
 └── scripts/
-    ├── release_gitee.py                # Gitee + GitHub 双发布脚本
-    └── process_logo.py                 # 从 logo.png 生成 ico/icns/各尺寸 PNG
+    └── release_gitee.py                # Gitee + GitHub 双发布脚本
 ```
 
 ## 兼容性
