@@ -109,7 +109,51 @@ naxone-adapters   ← 文件 IO / 进程管理 / 模板引擎 / 平台 API
 - `naxone-adapters` 实现 core 定义的 trait，可替换（未来做 Linux TUI 只换这层）
 - `naxone-tauri` 仅负责 IPC 转发和初始化
 
-更详细的目录结构见 [`crates/`](crates/) 下各 README。
+## 项目结构
+
+```
+naxone/
+├── Cargo.toml                          # Workspace 根（统一版本、共享依赖）
+├── LICENSE                             # MIT
+├── logo.png / logo_transparent.png     # 品牌资源
+├── crates/
+│   ├── naxone-core/                    # 纯领域逻辑，零外部依赖
+│   │   └── src/
+│   │       ├── domain/                 # 领域模型：Service / VirtualHost / PHP / Log
+│   │       ├── ports/                  # 端口 trait：ProcessManager / ConfigIO / TemplateEngine / PlatformOps
+│   │       ├── use_cases/              # 用例：ServiceManager / VhostManager / PhpManager / ConfigEditor
+│   │       ├── config.rs               # AppConfig（TOML 配置反序列化）
+│   │       └── error.rs                # 统一错误类型
+│   │
+│   ├── naxone-adapters/                # 端口的具体实现
+│   │   └── src/
+│   │       ├── config/                 # FsConfigIO（文件 IO）
+│   │       ├── package/                # 包扫描 + 软件商店（PHP 官方源 / GitHub 镜像源）
+│   │       ├── platform/               # WindowsPlatform / LinuxPlatform（hosts、SSL 自签、全局 PHP shim）
+│   │       ├── process/                # NativeProcessManager（进程启停 + 端口探测）
+│   │       ├── template/               # SimpleTemplateEngine（生成 nginx/apache vhost 配置）
+│   │       └── vhost/                  # VhostScanner（解析现有虚拟主机）
+│   │
+│   └── naxone-tauri/                   # 桌面 App 壳
+│       ├── src/
+│       │   ├── main.rs                 # Tauri 入口（系统托盘、插件注册）
+│       │   ├── state.rs                # AppState（依赖注入、配置加载、老用户迁移）
+│       │   └── commands/               # Tauri IPC 命令：service / vhost / php / settings / package / updater ...
+│       ├── frontend/                   # Vue 3 + Vite + Tailwind 前端
+│       │   └── src/
+│       │       ├── App.vue             # 根布局（自定义标题栏、侧栏、路由）
+│       │       ├── views/              # 页面：Dashboard / Vhosts / ServiceConfig / Settings
+│       │       ├── components/         # 复用组件：StoreCard / LogDrawer / SelectMenu ...
+│       │       └── assets/             # global.css（Tailwind + 主题变量）
+│       ├── tauri.conf.json             # Tauri 配置
+│       ├── nsis/installer-hooks.nsh    # Windows 安装器自定义（默认装到 D:\NaxOne）
+│       ├── icons/                      # 应用图标（自动从 logo.png 生成）
+│       └── capabilities/               # Tauri 权限配置
+│
+└── scripts/
+    ├── release_gitee.py                # Gitee + GitHub 双发布脚本
+    └── process_logo.py                 # 从 logo.png 生成 ico/icns/各尺寸 PNG
+```
 
 ## 兼容性
 
