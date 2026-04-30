@@ -1,168 +1,125 @@
+<div align="center">
+
+<img src="logo_transparent.png" alt="NaxOne" width="160" />
+
 # NaxOne
 
-> 用 Rust 重写的 PHPStudy —— 轻量、快速、现代化的本地 PHP 开发环境管理器
+**一站式本地开发集成环境** · 用 Rust 重写、Tauri 打包、Vue 现代界面
 
-NaxOne 是一个 Windows 桌面应用，用于替代 PHPStudy Pro，管理本地开发环境中的 Nginx / Apache / MySQL / Redis / PHP 服务。兼容现有 PHPStudy Pro 的安装目录和配置格式。
+[![License: MIT](https://img.shields.io/github/license/OverfireWater/naxone?color=blue)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/OverfireWater/naxone?label=release&color=brightgreen)](https://github.com/OverfireWater/naxone/releases)
+[![GitHub downloads](https://img.shields.io/github/downloads/OverfireWater/naxone/total?label=downloads&color=orange)](https://github.com/OverfireWater/naxone/releases)
+[![GitHub stars](https://img.shields.io/github/stars/OverfireWater/naxone?style=flat&label=GitHub%20stars)](https://github.com/OverfireWater/naxone/stargazers)
+[![Gitee stars](https://gitee.com/kz_y/naxone/badge/star.svg?theme=dark)](https://gitee.com/kz_y/naxone/stargazers)
+[![Gitee forks](https://gitee.com/kz_y/naxone/badge/fork.svg?theme=dark)](https://gitee.com/kz_y/naxone/members)
 
-## 功能
+[下载安装包 (Gitee)](https://gitee.com/kz_y/naxone/releases/latest) · [下载安装包 (GitHub)](https://github.com/OverfireWater/naxone/releases/latest) · [问题反馈](https://gitee.com/kz_y/naxone/issues)
 
-### 服务管理
-- 一键启动 / 停止 / 重启 Nginx、Apache、MySQL、Redis、PHP-CGI
-- Nginx 和 Apache 互斥（自动停止另一个）
-- 启动 Web 服务器时自动联动启动 PHP-CGI
-- 实时进程状态检测（通过端口探测 + 进程名验证）
+</div>
 
-### 虚拟主机管理
-- 创建 / 编辑 / 删除虚拟主机
-- Nginx 和 Apache 配置**双写**（切换 Web 服务器零成本）
-- 自动更新 Windows hosts 文件
-- 修改后自动 reload Nginx / Apache
-- 伪静态预设（Laravel / ThinkPHP / WordPress）
-- SSL / HTTPS 支持
-- 自定义 Nginx 指令
+---
 
-### 服务配置
-- **Nginx**：工作进程、连接数、超时、Gzip、请求限制等 19 项配置
-- **MySQL**：连接数、InnoDB 缓冲池、字符集、超时、缓冲区等 25 项配置
-- **Redis**：端口、内存、持久化、密码、淘汰策略等 20 项配置
-- **PHP**：扩展开关（toggle）、php.ini 配置（基础 / 安全 / OPCache / Session 等 34 项）
+NaxOne 是面向 PHP 开发者的 Windows 本地开发集成环境管理器。一个原生桌面 App 把 Nginx / Apache / MySQL / Redis / 多版本 PHP 全部装进同一个面板，启停、配置、虚拟主机、SSL 一站搞定。
 
-### 全局设置
-- PHPStudy 路径 / WWW 根目录
-- Web 服务器切换（Nginx / Apache）
-- 端口配置（MySQL / Redis）
-- 自动启动服务选择
-- 暗色 / 亮色 / 跟随系统主题切换
+技术栈：**Rust + Tauri 2 + Vue 3 + TypeScript**。冷启动 < 1s，内存常驻 < 100MB，安装包仅 4MB。
 
-### 系统托盘
-- 关闭窗口最小化到托盘（不退出）
-- 双击托盘图标恢复窗口
-- 右键菜单：显示主窗口 / 退出
+> **跟 PHPStudy 是什么关系？** NaxOne **不依赖 PHPStudy**，可以独立安装、独立运行。但如果你机器上**已经有 PHPStudy**，NaxOne 会自动识别它的安装目录、PHP/Nginx/MySQL 包，把它们也纳入管理——无需重装、不破坏现有站点。两者互不影响、平滑共存。
 
-## 技术栈
+## 功能亮点
 
-| 层 | 技术 |
-|----|------|
-| 后端 | Rust + Tokio + Tauri v2 |
-| 前端 | Vue 3 + TypeScript + Vite + Tailwind CSS 3 |
-| 图标 | Lucide Icons |
-| 架构 | 六边形架构（Hexagonal / Ports & Adapters） |
+- **服务管理**：一键启停 Nginx / Apache / MySQL / Redis / PHP-CGI；Nginx 与 Apache 自动互斥；启动 Web 服务器联动拉起 PHP-CGI；端口探测 + 进程名校验，状态绝不假阳性
+- **虚拟主机**：创建/编辑/删除站点；Nginx + Apache 配置**双写**（切引擎零成本）；自动写入 hosts；改完即时 reload；伪静态预设（Laravel/ThinkPHP/WordPress）；一键自签 SSL
+- **PHP 多版本**：本地装多个 PHP，每个站点选独立版本；全局 CLI `php` 命令一键切版本（在用户 PATH 下挂 shim，新开终端立即生效）
+- **服务配置**：Nginx 19 项 / MySQL 25 项 / Redis 20 项 / PHP 34 项可视化配置；PHP 扩展开关；改动前自动 `.bak`
+- **软件商店**：内置 PHP 官方源 + GitHub 镜像源，按需下载历史版本，多镜像加速
+- **陌生进程检测**：仪表板自动识别外部占用 80/3306/6379 等端口的进程（含 PHPStudy 自带服务），点一下即可结束
+- **现代体验**：紧凑暗色界面、无原生标题栏、系统托盘最小化、自动更新检查、内存监控
 
-## 项目结构
+## 安装
 
-```
-naxone/
-├── Cargo.toml                    # Workspace 根配置
-├── crates/
-│   ├── naxone-core/           # 核心域（平台无关）
-│   │   └── src/
-│   │       ├── domain/           # 领域模型（Service, VirtualHost, PHP）
-│   │       ├── ports/            # 端口 Traits（ProcessManager, ConfigIO, TemplateEngine, PlatformOps）
-│   │       ├── use_cases/        # 用例（ServiceManager, VhostManager, PhpManager, ConfigEditor）
-│   │       ├── config.rs         # AppConfig（TOML 配置）
-│   │       └── error.rs          # 统一错误类型
-│   │
-│   ├── naxone-adapters/       # 适配器（具体实现）
-│   │   └── src/
-│   │       ├── config/           # FsConfigIO（文件系统读写）
-│   │       ├── package/          # PhpStudyScanner（扫描 Extensions 目录）
-│   │       ├── platform/         # WindowsPlatform / LinuxPlatform（hosts 文件管理）
-│   │       ├── process/          # WindowsProcessManager（进程启停）
-│   │       ├── template/         # SimpleTemplateEngine（Nginx/Apache 配置生成）
-│   │       └── vhost/            # VhostScanner（解析现有虚拟主机）
-│   │
-│   └── naxone-tauri/          # Tauri 应用壳
-│       ├── src/
-│       │   ├── main.rs           # Tauri 入口（系统托盘、插件注册）
-│       │   ├── state.rs          # AppState（依赖注入、初始化）
-│       │   └── commands/         # IPC Commands（service, vhost, php, settings, service_config）
-│       ├── frontend/             # Vue 3 前端
-│       │   └── src/
-│       │       ├── App.vue       # 根布局（标题栏、侧栏、路由）
-│       │       ├── assets/       # global.css（Tailwind + 主题变量）
-│       │       └── views/        # 页面（Dashboard, Vhosts, ServiceConfig, Settings）
-│       ├── tauri.conf.json       # Tauri 配置
-│       ├── capabilities/         # 权限配置
-│       └── icons/                # 应用图标
-```
+直接下最新版安装包：
 
-## 开发
+| | 链接 |
+|---|---|
+| 国内（推荐） | [Gitee Releases](https://gitee.com/kz_y/naxone/releases/latest) |
+| 海外 | [GitHub Releases](https://github.com/OverfireWater/naxone/releases/latest) |
 
-### 前置条件
+文件名 `NaxOne_X.Y.Z_x64-setup.exe`，约 4 MB。NSIS 打包，**默认装到 `D:\NaxOne`**（如果你 D 盘存在，否则 `C:\NaxOne`）。
+
+要求 Windows 10 1809+ / Windows 11，x64 架构。
+
+## 从源码构建
+
+### 前置
 
 - [Rust](https://rustup.rs/) >= 1.75
 - [Node.js](https://nodejs.org/) >= 20
-- [PHPStudy Pro](https://www.xp.cn/) 已安装（默认路径 `D:\phpstudy_pro`）
 
-### 运行
+### 开发模式
 
 ```bash
-# 克隆项目
-cd D:\phpstudy_pro\WWW\utils\naxone
-
 # 安装前端依赖
 cd crates/naxone-tauri/frontend
 npm install
 
-# 启动开发模式（自动编译 Rust + 启动 Vite）
+# 启动（自动跑 Vite + 编译 Rust + 起 Tauri 窗口）
 cd ..
 cargo tauri dev
 ```
 
-### 构建
+### 打包
 
 ```bash
 cargo tauri build
-```
-
-生成的安装包在 `target/release/bundle/` 目录。
-
-### 发布到 Gitee Release
-
-```bash
-# 先准备 token（不要提交到仓库）
-export GITEE_TOKEN=...
-
-# 或者先 source 本地忽略文件
-source release.env.local
-
-# 构建后上传当前版本的安装包
-python scripts/release_gitee.py
+# 安装包位于 target/release/bundle/nsis/
 ```
 
 ### 运行测试
 
 ```bash
-cargo test -p naxone-adapters -- --nocapture
+cargo test --workspace
 ```
 
-## 架构说明
+### 发布到 Gitee + GitHub（双发布）
 
-采用**六边形架构**（Hexagonal Architecture），核心业务逻辑与外部依赖完全解耦：
+```bash
+# 准备 Gitee token（GitHub 走本地 gh CLI，已 auth login 即可）
+cp release.env.local.example release.env.local
+# 填入 GITEE_TOKEN
 
-```
-Frontend (Vue 3)
-    ↓ invoke()
-Tauri Commands (IPC 桥接)
-    ↓
-Use Cases (业务编排)
-    ↓
-Ports (Trait 接口)
-    ↓
-Adapters (具体实现: 文件系统 / 进程管理 / 模板引擎)
+# 双发布
+python scripts/release_gitee.py --notes-file RELEASE_NOTES_X.Y.Z.md
 ```
 
-- **Core** 不依赖任何外部 crate（纯 Rust + serde），可独立测试
-- **Adapters** 实现 Core 定义的 Trait，可替换（如未来做 Linux TUI）
-- **Tauri** 层只做 IPC 转发和状态管理
+## 架构
+
+采用**六边形架构**（Hexagonal / Ports & Adapters），核心业务逻辑跟外部依赖完全解耦：
+
+```
+Frontend (Vue 3 + Tailwind)
+    ↓ Tauri invoke()
+naxone-tauri      ← IPC 桥接 + 应用状态
+    ↓
+naxone-core       ← 用例编排 + 端口 trait（无外部依赖）
+    ↑
+naxone-adapters   ← 文件 IO / 进程管理 / 模板引擎 / 平台 API
+```
+
+- `naxone-core` 不依赖任何具体实现，可独立单元测试
+- `naxone-adapters` 实现 core 定义的 trait，可替换（未来做 Linux TUI 只换这层）
+- `naxone-tauri` 仅负责 IPC 转发和初始化
+
+更详细的目录结构见 [`crates/`](crates/) 下各 README。
 
 ## 兼容性
 
-- 兼容 PHPStudy Pro 的 `Extensions` 目录结构
-- 自动扫描已安装的 PHP / Nginx / Apache / MySQL / Redis 版本
-- 生成的虚拟主机配置格式与 PHPStudy 完全一致
-- 配置文件修改前自动备份（`.bak`）
+- **PHPStudy Pro**：自动扫描其 `Extensions` 目录里的 PHP/Nginx/Apache/MySQL/Redis 包；生成的 vhost 配置格式与 PHPStudy 完全一致，可双向迁移
+- **PHP 官方包**：直接识别 windows.php.net 下载的 zip 解压目录
+- **配置文件**：所有写操作前自动 `.bak` 备份
+- **从 RustStudy 升级**：首次启动 NaxOne 会自动迁移 `~/.ruststudy` 和 `%APPDATA%\RustStudy` 到对应的 NaxOne 目录
 
 ## 许可证
 
-MIT
+[MIT](LICENSE) © 2026 NaxOne Contributors
+
+PHP/Nginx/Apache/MySQL/Redis 等被管理的二进制各自遵循其原有许可证（PHP License / BSD / Apache 2.0 / GPL / BSD），NaxOne 仅作为本地启停和配置工具，不重分发上述二进制。
