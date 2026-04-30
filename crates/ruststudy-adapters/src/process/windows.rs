@@ -291,9 +291,10 @@ impl WindowsProcessManager {
                 if p == 0 {
                     return ServiceStatus::Stopped;
                 }
-                // Web 服务器共享 80 端口时需要按进程名校验；PHP 信任端口
+                // 非 PHP 服务（共享端口 80/3306/6379 等）必须校验 PID 真的属于本实例的安装目录，
+                // 否则同 kind 多版本会一起报"运行中"。PHP 每个实例独占端口，信端口即可。
                 if instance.kind != ServiceKind::Php
-                    && !pid_matches_service(p, instance.kind).await
+                    && !pid_matches_instance(p, instance).await
                 {
                     return ServiceStatus::Stopped;
                 }
@@ -326,6 +327,26 @@ impl WindowsProcessManager {
 #[async_trait]
 impl ProcessManager for WindowsProcessManager {
     async fn start(&self, instance: &ServiceInstance) -> Result<u32> {
+        // 端口预检：PHP 可多端口共存不查；其余 kind 端口被外部进程占着的话直接 bail，
+        // 避免 redis/nginx/mysqld 因 bind 失败 exit 1，把"端口冲突"伪装成"启动失败 exit code 1"。
+        if instance.kind != ServiceKind::Php {
+            let snap = self.snapshot_listening_ports().await;
+            if let Some(&existing_pid) = snap.get(&instance.port) {
+                if existing_pid != 0 && !pid_matches_instance(existing_pid, instance).await {
+                    let exe = get_process_exe_path(existing_pid)
+                        .await
+                        .unwrap_or_else(|| "未知进程".to_string());
+                    return Err(RustStudyError::Process(format!(
+                        "{} 启动失败：端口 {} 已被外部进程占用 (PID {}, {})。请先在仪表板结束外部进程后重试。",
+                        instance.kind.display_name(),
+                        instance.port,
+                        existing_pid,
+                        exe,
+                    )));
+                }
+            }
+        }
+
         let mut cmd = Self::build_start_command(instance)?;
         cmd.no_window();
 
@@ -351,20 +372,45 @@ impl ProcessManager for WindowsProcessManager {
         // Check if process exited immediately (config error etc.)
         match child.try_wait() {
             Ok(Some(status)) if !status.success() => {
-                // Process exited with error, read stderr for details
-                let stderr = if let Some(mut err) = child.stderr.take() {
-                    let mut buf = String::new();
-                    use tokio::io::AsyncReadExt;
-                    let _ = err.read_to_string(&mut buf).await;
-                    buf
-                } else {
-                    String::new()
-                };
+                // 同时读 stdout 和 stderr —— Redis on Windows 把 fatal 打到 stdout
+                use tokio::io::AsyncReadExt;
+                let mut stderr_buf = String::new();
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = err.read_to_string(&mut stderr_buf).await;
+                }
+                let mut stdout_buf = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_string(&mut stdout_buf).await;
+                }
+                let combined = format!("{}\n{}", stderr_buf.trim(), stdout_buf.trim());
+                let combined = combined.trim();
                 let code = status.code().unwrap_or(-1);
-                let msg = if stderr.trim().is_empty() {
-                    format!("{} 启动失败 (exit code {})", instance.kind.display_name(), code)
+                let msg = if combined.is_empty() {
+                    // stderr/stdout 都空时，退回去补一次端口探测，给个更有信息量的根因
+                    let snap = self.snapshot_listening_ports().await;
+                    if let Some(&p) = snap.get(&instance.port) {
+                        if p != 0 && !pid_matches_instance(p, instance).await {
+                            let exe = get_process_exe_path(p).await.unwrap_or_default();
+                            format!(
+                                "{} 启动失败 (exit code {})：端口 {} 已被外部进程占用 (PID {}, {})",
+                                instance.kind.display_name(),
+                                code,
+                                instance.port,
+                                p,
+                                exe
+                            )
+                        } else {
+                            format!("{} 启动失败 (exit code {})", instance.kind.display_name(), code)
+                        }
+                    } else {
+                        format!("{} 启动失败 (exit code {})", instance.kind.display_name(), code)
+                    }
                 } else {
-                    format!("{} 启动失败: {}", instance.kind.display_name(), stderr.trim().lines().last().unwrap_or("unknown error"))
+                    format!(
+                        "{} 启动失败: {}",
+                        instance.kind.display_name(),
+                        combined.lines().last().unwrap_or("unknown error")
+                    )
                 };
                 return Err(RustStudyError::Process(msg));
             }
@@ -397,6 +443,7 @@ impl ProcessManager for WindowsProcessManager {
         self.auto_restart.write().await.remove(&instance.id());
 
         // Try graceful stop command first (nginx -s quit, httpd -k stop, redis-cli shutdown)
+        let mut graceful_ok = false;
         if let Some(mut cmd) = Self::build_stop_command(instance) {
             cmd.no_window();
             let result = cmd
@@ -407,6 +454,7 @@ impl ProcessManager for WindowsProcessManager {
 
             if let Ok(status) = result {
                 if status.success() {
+                    graceful_ok = true;
                     tracing::info!(
                         service = instance.kind.display_name(),
                         "Service stopped gracefully"
@@ -415,45 +463,64 @@ impl ProcessManager for WindowsProcessManager {
             }
         }
 
-        // Fallback: find PID by port and kill it
-        let pid = {
-            let procs = self.processes.read().await;
-            if let Some(info) = procs.get(&instance.id()) {
-                info.pid
-            } else {
-                // Not tracked by us, find PID via port (e.g. PHPStudy started it)
-                find_pid_by_port(instance.port).await
+        // 优雅命令成功时给进程时间退出，避免接下去 taskkill 撞上"刚退出"的竞态。
+        // 端口释放即视为成功，无需再 taskkill。最长等约 3s。
+        if graceful_ok {
+            for _ in 0..20 {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                if !probe_port(instance.port).await {
+                    break;
+                }
             }
-        };
+        }
 
-        if pid > 0 {
-            let kill = Command::new("taskkill")
-                .no_window()
-                .args(["/F", "/PID", &pid.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .output()
-                .await;
-            // taskkill 失败（常见：外部管理员进程 Access is denied）→ 上报而非静默
-            if let Ok(out) = &kill {
-                if !out.status.success() {
-                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                    let hint = if stderr.contains("Access is denied") || stderr.contains("拒绝访问")
-                    {
-                        format!(
-                            "无法结束 {} (PID {}): 权限不足（进程可能以管理员身份启动）",
-                            instance.kind.display_name(),
-                            pid
-                        )
-                    } else {
-                        format!(
-                            "无法结束 {} (PID {}): {}",
-                            instance.kind.display_name(),
-                            pid,
-                            stderr
-                        )
-                    };
-                    return Err(RustStudyError::Process(hint));
+        // 端口没释放才走 taskkill 兜底（外部启动 / 优雅命令未支持 / 残留 worker）
+        if probe_port(instance.port).await {
+            let pid = {
+                let procs = self.processes.read().await;
+                if let Some(info) = procs.get(&instance.id()) {
+                    info.pid
+                } else {
+                    find_pid_by_port(instance.port).await
+                }
+            };
+
+            if pid > 0 {
+                let kill = Command::new("taskkill")
+                    .no_window()
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+                    .await;
+                if let Ok(out) = &kill {
+                    if !out.status.success() {
+                        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                        let lower = stderr.to_lowercase();
+                        // taskkill 报 "could not be found" / "找不到" 表示进程刚退出 → 视为成功
+                        let already_gone = lower.contains("not be found")
+                            || lower.contains("not found")
+                            || stderr.contains("找不到");
+                        if !already_gone {
+                            let hint = if lower.contains("access is denied")
+                                || stderr.contains("拒绝访问")
+                            {
+                                format!(
+                                    "无法结束 {} (PID {}): 权限不足（进程可能以管理员身份启动）",
+                                    instance.kind.display_name(),
+                                    pid
+                                )
+                            } else {
+                                format!(
+                                    "无法结束 {} (PID {}): {}",
+                                    instance.kind.display_name(),
+                                    pid,
+                                    stderr
+                                )
+                            };
+                            return Err(RustStudyError::Process(hint));
+                        }
+                    }
                 }
             }
         }
@@ -461,19 +528,34 @@ impl ProcessManager for WindowsProcessManager {
         // 最后确认端口真的释放了（覆盖 pid=0 但端口仍被占用的情况，例如多个同类残留进程）
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         if probe_port(instance.port).await {
-            // 再探一次外部 PID，能拿到就一起报出去
-            let still_pid = find_pid_by_port(instance.port).await;
-            let extra = if still_pid > 0 {
-                format!("（端口仍被 PID {} 占用）", still_pid)
-            } else {
-                String::new()
-            };
-            return Err(RustStudyError::Process(format!(
-                "{} 已发出停止命令但端口 {} 仍被占用{}",
-                instance.kind.display_name(),
-                instance.port,
-                extra
-            )));
+            // 兜底：把所有 install_path 下的同 exe 名进程一起清掉
+            // （nginx master 死了 worker 还活着、apache 服务进程残留 等场景）
+            let killed = kill_workers_under_install_path(instance).await;
+            if killed > 0 {
+                tracing::info!(
+                    service = instance.kind.display_name(),
+                    install = %instance.install_path.display(),
+                    killed,
+                    "兜底清理 install_path 下的残留进程"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+
+            // 再探一次，仍占用才真错
+            if probe_port(instance.port).await {
+                let still_pid = find_pid_by_port(instance.port).await;
+                let extra = if still_pid > 0 {
+                    format!("（端口仍被 PID {} 占用）", still_pid)
+                } else {
+                    String::new()
+                };
+                return Err(RustStudyError::Process(format!(
+                    "{} 已发出停止命令但端口 {} 仍被占用{}",
+                    instance.kind.display_name(),
+                    instance.port,
+                    extra
+                )));
+            }
         }
 
         let mut procs = self.processes.write().await;
@@ -485,7 +567,6 @@ impl ProcessManager for WindowsProcessManager {
 
         tracing::info!(
             service = instance.kind.display_name(),
-            pid = pid,
             "Service stopped"
         );
         Ok(())
@@ -525,6 +606,23 @@ impl ProcessManager for WindowsProcessManager {
     async fn reload(&self, instance: &ServiceInstance) -> Result<()> {
         match instance.kind {
             ServiceKind::Nginx => {
+                // 护栏：`nginx -s reload` 依赖 logs/nginx.pid 找到 master 进程发信号。
+                // pid 文件被截断成 0 字节时（master 异常死亡 / 多进程踩踏），nginx
+                // 会报 `invalid PID number ""` 这种迷惑错误。这里前置一个清楚的提示，
+                // 让用户去点【重启】而不是反复触发 reload。
+                let pid_file = instance.install_path.join("logs").join("nginx.pid");
+                let pid_ok = std::fs::read_to_string(&pid_file)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                    .filter(|&p| p > 0)
+                    .is_some();
+                if !pid_ok {
+                    return Err(RustStudyError::Process(format!(
+                        "Nginx 状态异常：{} 为空或无效。请先点 Nginx 卡片的【重启】让它干净拉起一次。",
+                        pid_file.display()
+                    )));
+                }
+
                 // First run -t to test config
                 let exe = instance.install_path.join("nginx.exe");
                 let test = Command::new(&exe)
@@ -590,7 +688,7 @@ async fn find_pid_by_port(port: u16) -> u32 {
 }
 
 /// 一次 netstat 调用解析出所有 LISTENING 端口 → PID 映射
-async fn netstat_snapshot() -> HashMap<u16, u32> {
+pub async fn netstat_snapshot() -> HashMap<u16, u32> {
     let mut map = HashMap::new();
     let output = Command::new("netstat")
         .no_window()
@@ -681,7 +779,7 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 }
 
 /// Get the executable name of a process by PID using `tasklist`
-async fn get_process_name(pid: u32) -> Option<String> {
+pub async fn get_process_name(pid: u32) -> Option<String> {
     if pid == 0 {
         return None;
     }
@@ -701,6 +799,41 @@ async fn get_process_name(pid: u32) -> Option<String> {
     Some(name.trim_matches('"').to_lowercase())
 }
 
+/// 取进程的真实 exe 完整路径（用 wmic）。失败返回 None。
+/// 用来识别端口占用者属于哪个安装目录（外部进程检测）。
+pub async fn get_process_exe_path(pid: u32) -> Option<String> {
+    if pid == 0 {
+        return None;
+    }
+    let output = Command::new("wmic")
+        .no_window()
+        .args([
+            "process",
+            "where",
+            &format!("ProcessId={}", pid),
+            "get",
+            "ExecutablePath",
+            "/value",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await
+        .ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("ExecutablePath=") {
+            let path = rest.trim();
+            if !path.is_empty() {
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Check if a PID belongs to a specific service kind
 async fn pid_matches_service(pid: u32, kind: ServiceKind) -> bool {
     if pid == 0 {
@@ -716,6 +849,113 @@ async fn pid_matches_service(pid: u32, kind: ServiceKind) -> bool {
         ServiceKind::Mysql => name.contains("mysqld"),
         ServiceKind::Redis => name.contains("redis"),
     }
+}
+
+/// 比 pid_matches_service 严格一档：除了进程名匹配，还要求 exe 路径在 instance.install_path 下。
+/// 解决"同 kind 多版本共享端口"导致的状态错位（如装了两个 Redis，跑着 3.0.504 时 5.0.14.1 也报 Running）。
+/// 取不到 exe 路径时退化为只信进程名（避免误报 Stopped）。
+async fn pid_matches_instance(pid: u32, instance: &ServiceInstance) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if !pid_matches_service(pid, instance.kind).await {
+        return false;
+    }
+    let Some(exe_path) = get_process_exe_path(pid).await else {
+        return true;
+    };
+    let exe = exe_path.replace('/', "\\").to_lowercase();
+    let install = instance
+        .install_path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_lowercase();
+    if install.is_empty() {
+        return true;
+    }
+    let prefix = if install.ends_with('\\') {
+        install.clone()
+    } else {
+        format!("{}\\", install)
+    };
+    exe.starts_with(&prefix)
+}
+
+/// 兜底清理：扫所有 exe 名匹配 kind 的进程，过滤出 exe 路径在 instance.install_path 下的，
+/// 全部 taskkill。处理 nginx master 死了 worker 还活着的残留情况。
+/// 返回成功 kill 的进程数。
+async fn kill_workers_under_install_path(instance: &ServiceInstance) -> usize {
+    let exe_name = match instance.kind {
+        ServiceKind::Nginx => "nginx.exe",
+        ServiceKind::Apache => "httpd.exe",
+        ServiceKind::Mysql => "mysqld.exe",
+        ServiceKind::Redis => "redis-server.exe",
+        ServiceKind::Php => "php-cgi.exe",
+    };
+
+    let install = instance
+        .install_path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_lowercase();
+    if install.is_empty() {
+        return 0;
+    }
+    let install_prefix = if install.ends_with('\\') {
+        install.clone()
+    } else {
+        format!("{}\\", install)
+    };
+
+    // 1) tasklist 找所有同 exe 名的 PID
+    let out = Command::new("tasklist")
+        .no_window()
+        .args([
+            "/FI",
+            &format!("IMAGENAME eq {}", exe_name),
+            "/FO",
+            "CSV",
+            "/NH",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await;
+    let Ok(out) = out else {
+        return 0;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    let mut killed = 0usize;
+    for line in text.lines() {
+        // CSV: "exe","pid","Console","1","memory"
+        let parts: Vec<&str> = line.split(',').map(|p| p.trim_matches('"').trim()).collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let Ok(pid) = parts[1].parse::<u32>() else {
+            continue;
+        };
+        // 校验 PID exe 路径在本 install 下
+        let Some(exe_path) = get_process_exe_path(pid).await else {
+            continue;
+        };
+        let exe_lower = exe_path.replace('/', "\\").to_lowercase();
+        if !exe_lower.starts_with(&install_prefix) {
+            continue;
+        }
+        let kill = Command::new("taskkill")
+            .no_window()
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await;
+        if kill.map(|o| o.status.success()).unwrap_or(false) {
+            killed += 1;
+        }
+    }
+    killed
 }
 
 #[cfg(test)]

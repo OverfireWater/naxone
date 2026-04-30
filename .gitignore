@@ -34,6 +34,7 @@ logs/
 *.env
 *.env.local
 .env
+release.env.local
 
 # Tauri 构建产物会放在 target/ 下，上面已忽略。
 # 但独立的 bundle 目录也防一手：

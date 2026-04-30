@@ -1,13 +1,67 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from "vue";
+import { ref, watch, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { confirm } from "@tauri-apps/plugin-dialog";
 import { toast } from "../composables/useToast";
+import SelectMenu from "../components/SelectMenu.vue";
 
 type Tab = "nginx" | "mysql" | "redis" | "php" | "hosts";
 const activeTab = ref<Tab>("nginx");
 const busy = ref(false);
 const saved = ref(false);
+const boolOptions = [
+  { label: "开启", value: true },
+  { label: "关闭", value: false },
+];
+const mysqlFlushOptions = [
+  { label: "0 - 每秒刷新", value: 0 },
+  { label: "1 - 每次提交(最安全)", value: 1 },
+  { label: "2 - 写日志每秒刷盘", value: 2 },
+];
+const mysqlCharsetOptions = [
+  { label: "utf8", value: "utf8" },
+  { label: "utf8mb4", value: "utf8mb4" },
+  { label: "latin1", value: "latin1" },
+  { label: "gbk", value: "gbk" },
+];
+const mysqlEngineOptions = [
+  { label: "InnoDB", value: "InnoDB" },
+  { label: "MyISAM", value: "MyISAM" },
+];
+const mysqlLogVerbosityOptions = [
+  { label: "1 - 仅错误", value: 1 },
+  { label: "2 - 错误+警告", value: 2 },
+  { label: "3 - 全部", value: 3 },
+];
+const redisPolicyOptions = [
+  { label: "noeviction", value: "noeviction" },
+  { label: "allkeys-lru", value: "allkeys-lru" },
+  { label: "volatile-lru", value: "volatile-lru" },
+  { label: "allkeys-random", value: "allkeys-random" },
+  { label: "volatile-random", value: "volatile-random" },
+  { label: "volatile-ttl", value: "volatile-ttl" },
+];
+const redisAppendfsyncOptions = [
+  { label: "everysec", value: "everysec" },
+  { label: "always", value: "always" },
+  { label: "no", value: "no" },
+];
+const redisLoglevelOptions = [
+  { label: "debug", value: "debug" },
+  { label: "verbose", value: "verbose" },
+  { label: "notice", value: "notice" },
+  { label: "warning", value: "warning" },
+];
+const phpSessionHandlerOptions = [
+  { label: "files", value: "files" },
+  { label: "redis", value: "redis" },
+  { label: "memcached", value: "memcached" },
+];
+const phpSameSiteOptions = [
+  { label: "不设置", value: "" },
+  { label: "Lax", value: "Lax" },
+  { label: "Strict", value: "Strict" },
+  { label: "None", value: "None" },
+];
 
 function showError(msg: string) { toast.error(String(msg)); }
 function showSaved() { saved.value = true; setTimeout(() => (saved.value = false), 2000); }
@@ -105,6 +159,10 @@ async function savePhpIni() {
 }
 
 watch(selectedPhp, () => { loadPhpExts(); loadPhpIni(); });
+const phpInstanceOptions = computed(() => phpInstances.value.map((inst) => ({ label: inst.label, value: inst.id })));
+function selectPhpInstance(id: string | number | boolean | null) {
+  selectedPhp.value = phpInstances.value.find(i => i.id === id) || null;
+}
 
 // ======================== Hosts ========================
 const hostsText = ref("");
@@ -136,10 +194,7 @@ async function saveHosts() {
   } catch (e) {
     const msg = String(e ?? "");
     if (msg.startsWith("PERMISSION_DENIED:")) {
-      const ok = await confirm("保存 hosts 需要管理员权限，是否继续提权保存？", {
-        title: "需要管理员权限",
-        kind: "warning",
-      });
+      const ok = await confirm("保存 hosts 需要管理员权限，是否继续提权保存？");
       if (!ok) return;
       await invoke("save_hosts_text_elevated", { text: hostsText.value });
       hostsOriginal.value = hostsText.value;
@@ -196,8 +251,6 @@ onMounted(loadTab);
 
 <template>
   <div class="max-w-[960px] has-save-bar">
-    <h1 class="text-base font-semibold mb-3">服务配置</h1>
-
     <div class="tabs-row">
       <button class="tab" :class="{ active: activeTab === 'nginx' }" @click="activeTab = 'nginx'">Nginx</button>
       <button class="tab" :class="{ active: activeTab === 'mysql' }" @click="activeTab = 'mysql'">MySQL</button>
@@ -220,11 +273,11 @@ onMounted(loadTab);
         <div class="fg"><label>保活超时(秒) <span class="k">keepalive_timeout</span></label><input class="input" type="number" v-model.number="nginx.keepalive_timeout" /></div>
         <div class="fg"><label>单连接最大请求数 <span class="k">keepalive_requests</span></label><input class="input" type="number" v-model.number="nginx.keepalive_requests" /></div>
         <div class="fg"><label>发送超时(秒) <span class="k">send_timeout</span></label><input class="input" type="number" v-model.number="nginx.send_timeout" /></div>
-        <div class="fg"><label>超时连接重置 <span class="k">reset_timedout_connection</span></label><select class="input" v-model="nginx.reset_timedout_connection"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
+        <div class="fg"><label>超时连接重置 <span class="k">reset_timedout_connection</span></label><SelectMenu v-model="nginx.reset_timedout_connection" :options="boolOptions" full-width trigger-class="input" /></div>
       </div>
       <div class="cfg-section">文件传输</div>
       <div class="cfg-grid">
-        <div class="fg"><label>高效文件传输 <span class="k">sendfile</span></label><select class="input" v-model="nginx.sendfile"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
+        <div class="fg"><label>高效文件传输 <span class="k">sendfile</span></label><SelectMenu v-model="nginx.sendfile" :options="boolOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>单次发送最大字节 <span class="k">sendfile_max_chunk</span></label><input class="input" v-model="nginx.sendfile_max_chunk" /></div>
       </div>
       <div class="cfg-section">请求限制</div>
@@ -238,7 +291,7 @@ onMounted(loadTab);
       </div>
       <div class="cfg-section">Gzip 压缩</div>
       <div class="cfg-grid">
-        <div class="fg"><label>启用 Gzip <span class="k">gzip</span></label><select class="input" v-model="nginx.gzip"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
+        <div class="fg"><label>启用 Gzip <span class="k">gzip</span></label><SelectMenu v-model="nginx.gzip" :options="boolOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>压缩等级(1-9) <span class="k">gzip_level</span></label><input class="input" type="number" v-model.number="nginx.gzip_level" min="1" max="9" /></div>
         <div class="fg"><label>最小压缩体积(字节) <span class="k">gzip_min_length</span></label><input class="input" type="number" v-model.number="nginx.gzip_min_length" /></div>
       </div>
@@ -258,7 +311,7 @@ onMounted(loadTab);
         <div class="fg"><label>缓冲池大小 <span class="k">innodb_buffer_pool_size</span></label><input class="input" v-model="mysql.innodb_buffer_pool_size" /></div>
         <div class="fg"><label>日志文件大小 <span class="k">innodb_log_file_size</span></label><input class="input" v-model="mysql.innodb_log_file_size" /></div>
         <div class="fg"><label>日志缓冲大小 <span class="k">innodb_log_buffer_size</span></label><input class="input" v-model="mysql.innodb_log_buffer_size" /></div>
-        <div class="fg"><label>事务刷新策略 <span class="k">innodb_flush_log_at_trx_commit</span></label><select class="input" v-model.number="mysql.innodb_flush_log_at_trx_commit"><option :value="0">0 - 每秒刷新</option><option :value="1">1 - 每次提交(最安全)</option><option :value="2">2 - 写日志每秒刷盘</option></select></div>
+        <div class="fg"><label>事务刷新策略 <span class="k">innodb_flush_log_at_trx_commit</span></label><SelectMenu v-model="mysql.innodb_flush_log_at_trx_commit" :options="mysqlFlushOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>锁等待超时(秒) <span class="k">innodb_lock_wait_timeout</span></label><input class="input" type="number" v-model.number="mysql.innodb_lock_wait_timeout" /></div>
       </div>
       <div class="cfg-section">缓冲与缓存</div>
@@ -277,11 +330,11 @@ onMounted(loadTab);
       </div>
       <div class="cfg-section">字符集与存储</div>
       <div class="cfg-grid">
-        <div class="fg"><label>服务端字符集 <span class="k">character-set-server</span></label><select class="input" v-model="mysql.character_set_server"><option>utf8</option><option>utf8mb4</option><option>latin1</option><option>gbk</option></select></div>
+        <div class="fg"><label>服务端字符集 <span class="k">character-set-server</span></label><SelectMenu v-model="mysql.character_set_server" :options="mysqlCharsetOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>排序规则 <span class="k">collation-server</span></label><input class="input" v-model="mysql.collation_server" /></div>
         <div class="fg"><label>初始化连接命令 <span class="k">init_connect</span></label><input class="input" v-model="mysql.init_connect" /></div>
-        <div class="fg"><label>默认存储引擎 <span class="k">default-storage-engine</span></label><select class="input" v-model="mysql.default_storage_engine"><option>InnoDB</option><option>MyISAM</option></select></div>
-        <div class="fg"><label>错误日志详细级别 <span class="k">log_error_verbosity</span></label><select class="input" v-model.number="mysql.log_error_verbosity"><option :value="1">1 - 仅错误</option><option :value="2">2 - 错误+警告</option><option :value="3">3 - 全部</option></select></div>
+        <div class="fg"><label>默认存储引擎 <span class="k">default-storage-engine</span></label><SelectMenu v-model="mysql.default_storage_engine" :options="mysqlEngineOptions" full-width trigger-class="input" /></div>
+        <div class="fg"><label>错误日志详细级别 <span class="k">log_error_verbosity</span></label><SelectMenu v-model="mysql.log_error_verbosity" :options="mysqlLogVerbosityOptions" full-width trigger-class="input" /></div>
       </div>
     </div>
 
@@ -299,18 +352,18 @@ onMounted(loadTab);
       <div class="cfg-section">内存</div>
       <div class="cfg-grid">
         <div class="fg"><label>最大内存(字节) <span class="k">maxmemory</span></label><input class="input" v-model="redis.maxmemory" /></div>
-        <div class="fg"><label>淘汰策略 <span class="k">maxmemory-policy</span></label><select class="input" v-model="redis.maxmemory_policy"><option>noeviction</option><option>allkeys-lru</option><option>volatile-lru</option><option>allkeys-random</option><option>volatile-random</option><option>volatile-ttl</option></select></div>
+        <div class="fg"><label>淘汰策略 <span class="k">maxmemory-policy</span></label><SelectMenu v-model="redis.maxmemory_policy" :options="redisPolicyOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>数据库数量 <span class="k">databases</span></label><input class="input" type="number" v-model.number="redis.databases" /></div>
       </div>
       <div class="cfg-section">持久化</div>
       <div class="cfg-grid">
-        <div class="fg"><label>RDB 压缩 <span class="k">rdbcompression</span></label><select class="input" v-model="redis.rdbcompression"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
-        <div class="fg"><label>RDB 校验和 <span class="k">rdbchecksum</span></label><select class="input" v-model="redis.rdbchecksum"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
+        <div class="fg"><label>RDB 压缩 <span class="k">rdbcompression</span></label><SelectMenu v-model="redis.rdbcompression" :options="boolOptions" full-width trigger-class="input" /></div>
+        <div class="fg"><label>RDB 校验和 <span class="k">rdbchecksum</span></label><SelectMenu v-model="redis.rdbchecksum" :options="boolOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>RDB 文件名 <span class="k">dbfilename</span></label><input class="input" v-model="redis.dbfilename" /></div>
         <div class="fg"><label>工作目录 <span class="k">dir</span></label><input class="input" v-model="redis.dir" /></div>
-        <div class="fg"><label>保存失败时停止写入 <span class="k">stop-writes-on-bgsave-error</span></label><select class="input" v-model="redis.stop_writes_on_bgsave_error"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
-        <div class="fg"><label>AOF 持久化 <span class="k">appendonly</span></label><select class="input" v-model="redis.appendonly"><option :value="true">开启</option><option :value="false">关闭</option></select></div>
-        <div class="fg"><label>AOF 刷盘策略 <span class="k">appendfsync</span></label><select class="input" v-model="redis.appendfsync"><option>everysec</option><option>always</option><option>no</option></select></div>
+        <div class="fg"><label>保存失败时停止写入 <span class="k">stop-writes-on-bgsave-error</span></label><SelectMenu v-model="redis.stop_writes_on_bgsave_error" :options="boolOptions" full-width trigger-class="input" /></div>
+        <div class="fg"><label>AOF 持久化 <span class="k">appendonly</span></label><SelectMenu v-model="redis.appendonly" :options="boolOptions" full-width trigger-class="input" /></div>
+        <div class="fg"><label>AOF 刷盘策略 <span class="k">appendfsync</span></label><SelectMenu v-model="redis.appendfsync" :options="redisAppendfsyncOptions" full-width trigger-class="input" /></div>
       </div>
       <div class="cfg-section">安全</div>
       <div class="cfg-grid">
@@ -318,7 +371,7 @@ onMounted(loadTab);
       </div>
       <div class="cfg-section">日志</div>
       <div class="cfg-grid">
-        <div class="fg"><label>日志级别 <span class="k">loglevel</span></label><select class="input" v-model="redis.loglevel"><option>debug</option><option>verbose</option><option>notice</option><option>warning</option></select></div>
+        <div class="fg"><label>日志级别 <span class="k">loglevel</span></label><SelectMenu v-model="redis.loglevel" :options="redisLoglevelOptions" full-width trigger-class="input" /></div>
         <div class="fg"><label>日志文件 <span class="k">logfile</span></label><input class="input" v-model="redis.logfile" placeholder="留空输出到控制台" /></div>
       </div>
     </div>
@@ -327,9 +380,7 @@ onMounted(loadTab);
     <div v-if="activeTab === 'php'" class="tab-card p-6">
       <!-- PHP Version Selector -->
       <div class="flex items-center justify-between mb-5 gap-4">
-        <select v-if="phpInstances.length > 0" class="input sel w-[200px] shrink-0" :value="selectedPhp?.id" @change="selectedPhp = phpInstances.find(i => i.id === ($event.target as HTMLSelectElement).value) || null">
-          <option v-for="inst in phpInstances" :key="inst.id" :value="inst.id">{{ inst.label }}</option>
-        </select>
+        <SelectMenu v-if="phpInstances.length > 0" :model-value="selectedPhp?.id ?? null" :options="phpInstanceOptions" full-width trigger-class="input w-[200px] shrink-0" @update:modelValue="selectPhpInstance($event)" />
         <div class="flex gap-1">
           <button
             v-for="st in [{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'}]" :key="st.k"
@@ -390,12 +441,12 @@ onMounted(loadTab);
         </div>
         <div class="cfg-section">Session 会话</div>
         <div class="cfg-grid">
-          <div class="fg"><label>存储方式 <span class="k">session.save_handler</span></label><select class="input" v-model="phpIni.session_save_handler"><option>files</option><option>redis</option><option>memcached</option></select></div>
+          <div class="fg"><label>存储方式 <span class="k">session.save_handler</span></label><SelectMenu v-model="phpIni.session_save_handler" :options="phpSessionHandlerOptions" full-width trigger-class="input" /></div>
           <div class="fg"><label>存储路径 <span class="k">session.save_path</span></label><input class="input" v-model="phpIni.session_save_path" placeholder="默认系统临时目录" /></div>
           <div class="fg"><label>Session 名称 <span class="k">session.name</span></label><input class="input" v-model="phpIni.session_name" /></div>
           <div class="fg"><label>GC 最大存活时间(秒) <span class="k">session.gc_maxlifetime</span></label><input class="input" type="number" v-model.number="phpIni.session_gc_maxlifetime" /></div>
           <div class="fg"><label>Cookie 有效期(秒) <span class="k">session.cookie_lifetime</span></label><input class="input" type="number" v-model.number="phpIni.session_cookie_lifetime" /></div>
-          <div class="fg"><label>Cookie SameSite <span class="k">session.cookie_samesite</span></label><select class="input" v-model="phpIni.session_cookie_samesite"><option value="">不设置</option><option>Lax</option><option>Strict</option><option>None</option></select></div>
+          <div class="fg"><label>Cookie SameSite <span class="k">session.cookie_samesite</span></label><SelectMenu v-model="phpIni.session_cookie_samesite" :options="phpSameSiteOptions" full-width trigger-class="input" /></div>
           <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">使用 Cookie <span class="k">session.use_cookies</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_cookies" /><span class="toggle-slider"></span></label></div>
           <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">仅使用 Cookie <span class="k">session.use_only_cookies</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_only_cookies" /><span class="toggle-slider"></span></label></div>
           <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">严格模式 <span class="k">session.use_strict_mode</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_strict_mode" /><span class="toggle-slider"></span></label></div>

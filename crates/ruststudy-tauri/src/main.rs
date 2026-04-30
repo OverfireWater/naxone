@@ -40,6 +40,9 @@ fn main() {
             commands::service::restart_service,
             commands::service::start_all,
             commands::service::stop_all,
+            commands::service::log_user_action,
+            commands::strangers::scan_running_strangers,
+            commands::strangers::kill_stranger,
             commands::vhost::get_vhosts,
             commands::vhost::create_vhost,
             commands::vhost::update_vhost,
@@ -163,26 +166,69 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     let auto_start = config.read().await.general.auto_start.clone();
                     if auto_start.is_empty() { return; }
-                    let mut svcs = services.write().await;
-                    for svc in svcs.iter_mut() {
+
+                    // 用 snapshot + start_with_deps，让自启 web 服务器时自动联动 PHP-CGI；
+                    // start_with_deps 还会处理 Nginx/Apache 互斥和同 kind 多版本互斥。
+                    let snapshot = { services.read().await.clone() };
+
+                    for (idx, svc) in snapshot.iter().enumerate() {
                         let kind_name = svc.kind.display_name().to_lowercase();
                         if !auto_start.iter().any(|a| kind_name.contains(a)) {
                             continue;
                         }
-                        // 先刷一次状态：初始 status=Stopped 是占位，端口已被占
-                        // （比如 PHPStudy 自己启动的实例）时应跳过而非重复启动
-                        let _ = service_manager.refresh_status(svc).await;
-                        if svc.status.is_running() {
+
+                        let mut target = svc.clone();
+                        // 先刷状态：端口已被占（如 PHPStudy 自启）时跳过，不重复启动
+                        let _ = service_manager.refresh_status(&mut target).await;
+                        if target.status.is_running() {
                             tracing::info!(
-                                service = svc.kind.display_name(),
+                                service = target.kind.display_name(),
                                 "自动启动跳过：已在运行"
                             );
+                            // 把刷新后的 status 同步回 shared services
+                            if let Some(s) = services.write().await.iter_mut().find(|s| s.id() == target.id()) {
+                                s.status = target.status.clone();
+                            }
                             continue;
                         }
-                        if let Err(e) = service_manager.start_service(svc).await {
-                            let msg = format!("{} 自动启动失败: {}", svc.kind.display_name(), e);
-                            tracing::error!("{}", &msg);
-                            errors.write().await.push(msg);
+
+                        // 构造 others（除 target 外的所有服务），让 start_with_deps 能联动 PHP / 处理互斥
+                        let mut others: Vec<_> = snapshot
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i != idx)
+                            .map(|(_, s)| s.clone())
+                            .collect();
+
+                        match service_manager.start_with_deps(&mut target, &mut others).await {
+                            Ok(_) => {
+                                // 同步 target + others（含被联动启动的 PHP-CGI）的状态回 shared services
+                                let mut svcs = services.write().await;
+                                if let Some(s) = svcs.iter_mut().find(|s| s.id() == target.id()) {
+                                    *s = target.clone();
+                                }
+                                for o in &others {
+                                    if let Some(s) = svcs.iter_mut().find(|s| s.id() == o.id()) {
+                                        s.status = o.status.clone();
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let estr = e.to_string();
+                                // 端口被外部进程占着是用户环境问题（PHPStudy / 系统服务等），
+                                // 走 warn 不弹"自动启动失败"红条，让用户在仪表板"陌生进程"banner 里处理。
+                                if estr.contains("已被外部进程占用") {
+                                    tracing::warn!(
+                                        service = target.kind.display_name(),
+                                        "自动启动跳过：{}",
+                                        estr
+                                    );
+                                } else {
+                                    let msg = format!("{} 自动启动失败: {}", target.kind.display_name(), e);
+                                    tracing::error!("{}", &msg);
+                                    errors.write().await.push(msg);
+                                }
+                            }
                         }
                     }
                 });

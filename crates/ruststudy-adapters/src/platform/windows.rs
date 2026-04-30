@@ -31,6 +31,72 @@ fn write_hosts(path: &Path, content: &str, had_bom: bool) -> Result<()> {
         .map_err(|e| RustStudyError::from_io_with_context(e, "写入 hosts 文件失败"))
 }
 
+/// UAC 提权写 hosts：先把目标内容写到 temp，再用 `Start-Process -Verb RunAs` 让
+/// 提权 PowerShell 把 temp 拷贝到真实 hosts 路径。整个过程只弹一次 UAC。
+fn write_hosts_elevated(path: &Path, content: &str, had_bom: bool) -> Result<()> {
+    let temp_dir = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let temp_path = temp_dir.join(format!("ruststudy-hosts-{}-{}.txt", std::process::id(), stamp));
+    let script_path = temp_dir.join(format!("ruststudy-hosts-{}-{}.ps1", std::process::id(), stamp));
+
+    // 把含 BOM 的字节直接写到 temp，提权脚本里 Copy-Item 字节级复制即可保留。
+    let mut bytes: Vec<u8> = Vec::with_capacity(content.len() + 3);
+    if had_bom {
+        bytes.extend_from_slice(UTF8_BOM);
+    }
+    bytes.extend_from_slice(content.as_bytes());
+    std::fs::write(&temp_path, &bytes)
+        .map_err(|e| RustStudyError::from_io_with_context(e, "写入临时 hosts 文件失败"))?;
+
+    let host_path_str = path.display().to_string().replace('"', "``\"");
+    let src_path_str = temp_path.display().to_string().replace('"', "``\"");
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'\nCopy-Item -LiteralPath \"{}\" -Destination \"{}\" -Force\n",
+        src_path_str, host_path_str
+    );
+    std::fs::write(&script_path, script.as_bytes())
+        .map_err(|e| RustStudyError::from_io_with_context(e, "写入提权脚本失败"))?;
+
+    let launcher = format!(
+        "Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'",
+        script_path.display().to_string().replace('"', "``\"")
+    );
+
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &launcher,
+        ])
+        .output()
+        .map_err(|e| RustStudyError::Process(format!("调用提权 PowerShell 失败: {}", e)))?;
+
+    let _ = std::fs::remove_file(&temp_path);
+    let _ = std::fs::remove_file(&script_path);
+
+    if !output.status.success() {
+        let combined = combined_output(&output);
+        let lower = combined.to_lowercase();
+        if combined.contains("取消") || lower.contains("cancel") || lower.contains("declined") {
+            return Err(RustStudyError::PermissionDenied(
+                "已取消（未确认管理员权限）".to_string(),
+            ));
+        }
+        return Err(RustStudyError::PermissionDenied(format!(
+            "提权写 hosts 失败: {}",
+            combined
+        )));
+    }
+
+    Ok(())
+}
+
 pub struct WindowsPlatform;
 
 impl PlatformOps for WindowsPlatform {
@@ -38,42 +104,56 @@ impl PlatformOps for WindowsPlatform {
         PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
     }
 
-    fn add_hosts_entry(&self, hostname: &str, ip: &str) -> Result<()> {
-        let hosts_path = self.hosts_file_path();
-        let (content, had_bom) = read_hosts(&hosts_path)?;
-
-        let entry = format!("{} {}", ip, hostname);
-        // 已存在完整条目则跳过
-        if content.lines().any(|l| {
-            let t = l.trim();
-            !t.starts_with('#') && t == entry
-        }) {
+    fn apply_hosts_changes(
+        &self,
+        additions: &[(String, String)],
+        removals: &[String],
+    ) -> Result<()> {
+        if additions.is_empty() && removals.is_empty() {
             return Ok(());
         }
 
-        let new_content = format!("{}\n{}\n", content.trim_end(), entry);
-        write_hosts(&hosts_path, &new_content, had_bom)
-    }
-
-    fn remove_hosts_entry(&self, hostname: &str) -> Result<()> {
         let hosts_path = self.hosts_file_path();
         let (content, had_bom) = read_hosts(&hosts_path)?;
 
-        let filtered: Vec<&str> = content
+        // 先按 removals 过滤掉相关行，再追加 additions（去重）。
+        let mut lines: Vec<String> = content
             .lines()
             .filter(|line| {
                 let trimmed = line.trim();
                 if trimmed.starts_with('#') || trimmed.is_empty() {
                     return true;
                 }
-                // 按空白分割后，域名出现在第二段开始（ip hostname [alias...]）
+                // ip hostname [alias...] —— 跳过 ip，看其余字段是否命中 removals
                 let mut parts = trimmed.split_whitespace();
                 let _ip = parts.next();
-                !parts.any(|p| p == hostname)
+                !parts.any(|p| removals.iter().any(|r| r == p))
             })
+            .map(|s| s.to_string())
             .collect();
 
-        write_hosts(&hosts_path, &filtered.join("\n"), had_bom)
+        for (hostname, ip) in additions {
+            let entry = format!("{} {}", ip, hostname);
+            let exists = lines.iter().any(|l| {
+                let t = l.trim();
+                !t.starts_with('#') && t == entry
+            });
+            if !exists {
+                lines.push(entry);
+            }
+        }
+
+        let new_content = format!("{}\n", lines.join("\n").trim_end_matches('\n'));
+
+        // 直接写；遇到权限不足走 UAC 提权一次性写入
+        match write_hosts(&hosts_path, &new_content, had_bom) {
+            Ok(()) => Ok(()),
+            Err(RustStudyError::PermissionDenied(_)) => {
+                tracing::info!("hosts 直接写入需要管理员权限，启动 UAC 提权");
+                write_hosts_elevated(&hosts_path, &new_content, had_bom)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn data_dir(&self) -> PathBuf {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { useRouter } from "vue-router";
 import { toast } from "../composables/useToast";
+import SelectMenu from "../components/SelectMenu.vue";
 
 interface ConfigDto {
   phpstudy_path: string; www_root: string; active_web_server: string;
@@ -14,7 +14,12 @@ interface ConfigDto {
 const config = ref<ConfigDto>({ phpstudy_path: "", www_root: "", active_web_server: "nginx", auto_start: [], mysql_port: 3306, redis_port: 6379, log_dir: "", log_retention_days: 7, stop_services_on_exit: false });
 const busy = ref(false);
 const saved = ref(false);
-const router = useRouter();
+const logRetentionOptions = [
+  { label: "3 天", value: 3 },
+  { label: "7 天", value: 7 },
+  { label: "30 天", value: 30 },
+  { label: "90 天", value: 90 },
+];
 
 // Theme
 const themeMode = ref(localStorage.getItem("ruststudy-theme") || "dark");
@@ -62,7 +67,6 @@ onMounted(() => { loadConfig(); });
 
 <template>
   <div class="max-w-[640px] has-save-bar">
-    <h1 class="text-base font-semibold mb-3">设置</h1>
 
     <!-- Theme -->
     <div class="card mb-3">
@@ -89,7 +93,7 @@ onMounted(() => { loadConfig(); });
         <div class="flex flex-col gap-1.5">
           <label class="text-[13px] text-content-secondary font-medium">PHPStudy 安装路径</label>
           <input class="input" v-model="config.phpstudy_path" placeholder="D:\phpstudy_pro" />
-          <p class="text-xs text-content-muted mt-1">扫描此目录下的 Extensions 发现已安装的服务；新建站点时网站根默认指向此路径的 WWW 子目录</p>
+          <p class="text-xs text-content-muted mt-1">扫描此目录下的 Extensions 发现已安装的服务；默认站点目录使用 RustStudy 自己管理的 www 路径，不跟随 PHPStudy 的 WWW</p>
         </div>
       </div>
     </div>
@@ -149,13 +153,6 @@ onMounted(() => { loadConfig(); });
       <p class="text-xs text-content-muted">仅托盘菜单“退出”生效；点窗口右上角关闭只是最小化到托盘。</p>
     </div>
 
-    <!-- Hosts Tools -->
-    <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">Hosts 工具</h2>
-      <p class="text-xs text-content-muted mb-3">已整合到“服务配置”页的 Hosts 标签中。</p>
-      <button class="btn btn-secondary btn-sm" @click="router.push('/config')">前往服务配置</button>
-    </div>
-
     <!-- Log Settings -->
     <div class="card mb-3">
       <h2 class="text-sm font-medium text-content-secondary mb-3">日志设置</h2>
@@ -169,12 +166,7 @@ onMounted(() => { loadConfig(); });
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="text-[13px] text-content-secondary font-medium">保留天数</label>
-          <select class="input sel" v-model.number="config.log_retention_days">
-            <option :value="3">3 天</option>
-            <option :value="7">7 天</option>
-            <option :value="30">30 天</option>
-            <option :value="90">90 天</option>
-          </select>
+          <SelectMenu v-model="config.log_retention_days" :options="logRetentionOptions" full-width trigger-class="input" />
         </div>
       </div>
     </div>

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, ChevronRight, Store, Settings2 } from "lucide-vue-next";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, ChevronRight, Store, Settings2, RefreshCw } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 import { APP_NAME } from "../composables/useAppInfo";
+import SelectMenu from "../components/SelectMenu.vue";
 import LogDrawer from "../components/LogDrawer.vue";
 
 const router = useRouter();
@@ -37,6 +38,46 @@ const localUptime = ref(0);
 interface UpdateInfo { available: boolean; latest_version: string; current_version: string; release_url: string; release_notes: string; download_url: string | null; }
 const updateInfo = ref<UpdateInfo | null>(null);
 const updateDismissed = ref(false);
+
+// 外部进程检测：占着我们关心端口但 exe 不在已扫安装目录里的进程（如系统装的 redis、第三方 nginx）
+interface StrangerService { kind: string; port: number; pid: number; exe_path: string; label: string; }
+const strangers = ref<StrangerService[]>([]);
+const strangerDismissed = ref<Set<number>>(new Set()); // 按 PID 标记本会话内已忽略的
+const strangerKilling = ref<Set<number>>(new Set());
+
+async function scanStrangers() {
+  try {
+    const list = await invokeWithTimeout<StrangerService[]>("scan_running_strangers", undefined, 8000);
+    // 过滤掉本会话已忽略的 PID
+    strangers.value = list.filter((s) => !strangerDismissed.value.has(s.pid));
+  } catch (e) {
+    // 静默失败：扫描属于辅助功能，失败不打扰用户
+    tracingWarn(`外部进程扫描失败: ${e}`);
+  }
+}
+
+function tracingWarn(msg: string) { console.warn("[strangers]", msg); }
+
+async function killStranger(s: StrangerService) {
+  if (strangerKilling.value.has(s.pid)) return;
+  strangerKilling.value.add(s.pid);
+  try {
+    await invokeWithTimeout("kill_stranger", { pid: s.pid }, 8000);
+    toast.success(`已结束 ${s.kind}（PID ${s.pid}）`);
+    strangers.value = strangers.value.filter((x) => x.pid !== s.pid);
+    // 顺手刷一下服务状态，端口释放后我方实例可能能正常启动
+    await loadServices(true);
+  } catch (e) {
+    showError(`结束失败: ${e}`);
+  } finally {
+    strangerKilling.value.delete(s.pid);
+  }
+}
+
+function dismissStranger(s: StrangerService) {
+  strangerDismissed.value.add(s.pid);
+  strangers.value = strangers.value.filter((x) => x.pid !== s.pid);
+}
 
 // 格式化运行时长："2h 13m" / "45m 30s" / "1d 2h"
 function fmtUptime(s: number): string {
@@ -123,6 +164,14 @@ function originShort(s: ServiceInfo): string {
   return "RS";
 }
 
+function versionOptionLabel(s: ServiceInfo, running: ServiceInfo | null): string {
+  return `${running?.id === s.id ? "● " : ""}v${s.version} [${originShort(s)}]`;
+}
+
+function phpOptionLabel(p: ServiceInfo): string {
+  return `v${p.version}${p.variant ? ` ${p.variant}` : ""} [${originShort(p)}]`;
+}
+
 /** 在不同版本运行时，从下拉选了另一个版本 + 点"切换" → 停旧启新 */
 async function switchToActive(kind: string, g: KindGroup) {
   if (!g.running || g.running.id === g.active.id) return;
@@ -148,6 +197,9 @@ const phpServices = computed(() => services.value.filter(s => s.kind === "php"))
 
 const phpRunning = computed(() => phpServices.value.filter(isRunning).length);
 
+/// 任意一个服务在跑就算"运行中"。用于决定全局按钮显示"全部启动"还是"全部停止"。
+const anyRunning = computed(() => services.value.some(isRunning));
+
 // ==================== Helpers ====================
 
 function isRunning(s: ServiceInfo): boolean { return s.status.state === "Running"; }
@@ -169,6 +221,27 @@ function showError(msg: string) {
 }
 
 function pauseAutoRefresh() { pauseUntil = Date.now() + 5000; }
+
+const refreshBusy = ref(false);
+/// 用户手动刷新：强拉一次完整状态，并暂停自动轮询 5s 避免和下一次定时拉重叠。
+async function manualRefresh() {
+  if (refreshBusy.value || batchBusy.value) return;
+  refreshBusy.value = true;
+  pauseAutoRefresh();
+  // 后端写一条日志（活动日志里能看到"用户手动刷新"），失败不影响刷新本身
+  invoke("log_user_action", { message: "用户手动刷新仪表板" }).catch(() => {});
+  try {
+    await Promise.all([
+      loadServices(true),
+      loadAppStats(),
+      loadGlobalPhp(),
+      loadRecentLogs(),
+      scanStrangers(),
+    ]);
+  } finally {
+    refreshBusy.value = false;
+  }
+}
 
 // ==================== Data loading ====================
 
@@ -351,24 +424,6 @@ async function stopAll() {
   finally { batchBusy.value = false; }
 }
 
-async function startAllPhp() {
-  pauseAutoRefresh();
-  for (const p of phpServices.value.filter(p => !isRunning(p))) {
-    busyIds.value.add(p.id);
-    try { services.value = await invokeWithTimeout("start_service", { id: p.id }); } catch (e) { showError(`启动 PHP ${p.version} 失败: ${e}`); }
-    finally { busyIds.value.delete(p.id); }
-  }
-}
-
-async function stopAllPhp() {
-  pauseAutoRefresh();
-  for (const p of phpServices.value.filter(isRunning)) {
-    busyIds.value.add(p.id);
-    try { services.value = await invokeWithTimeout("stop_service", { id: p.id }); } catch (e) { showError(`停止 PHP ${p.version} 失败: ${e}`); }
-    finally { busyIds.value.delete(p.id); }
-  }
-}
-
 // ==================== Log display ====================
 
 const levelIconMap: Record<string, any> = {
@@ -392,6 +447,8 @@ onMounted(async () => {
   loadGlobalPhp();
   loadAppStats();
   checkForUpdates();
+  // 异步扫描占用关键端口的外部进程（不阻塞首屏）
+  scanStrangers();
   // 后端在装/卸 / rescan 完成后推 services-changed 事件 → 立即刷新，不等轮询
   unlistenServicesChanged = await listen("services-changed", () => {
     loadServices(true);
@@ -419,8 +476,28 @@ onUnmounted(() => {
     <!-- Header -->
     <div class="flex items-center justify-end mb-3">
       <div class="flex gap-2">
-        <button class="btn btn-success btn-sm" :disabled="batchBusy" @click="startAll">{{ batchBusy ? "启动中..." : "全部启动" }}</button>
-        <button class="btn btn-danger btn-sm" :disabled="batchBusy" @click="stopAll">{{ batchBusy ? "停止中..." : "全部停止" }}</button>
+        <button class="btn btn-secondary btn-sm" :disabled="refreshBusy || batchBusy" @click="manualRefresh" title="刷新">
+          <RefreshCw :size="14" :class="{ 'animate-spin': refreshBusy }" />
+        </button>
+        <button v-if="anyRunning" class="btn btn-danger btn-sm" :disabled="batchBusy" @click="stopAll">{{ batchBusy ? "停止中..." : "全部停止" }}</button>
+        <button v-else class="btn btn-success btn-sm" :disabled="batchBusy" @click="startAll">{{ batchBusy ? "启动中..." : "全部启动" }}</button>
+      </div>
+    </div>
+
+    <!-- 外部进程提醒：占着关键端口但不在我们管理的安装目录里的进程 -->
+    <div v-for="s in strangers" :key="s.pid" class="stranger-banner mb-2">
+      <AlertTriangle :size="16" class="shrink-0" style="color: #f59e0b" />
+      <span class="text-[13px] flex-1 min-w-0 truncate">
+        检测到外部 <b>{{ s.kind }}</b> 占用端口 <b>{{ s.port }}</b>
+        <span class="font-mono text-[11px] ml-1 opacity-70">{{ s.exe_path }} (PID {{ s.pid }})</span>
+      </span>
+      <div class="flex gap-1.5 shrink-0">
+        <button class="btn btn-danger btn-sm"
+                :disabled="strangerKilling.has(s.pid)"
+                @click="killStranger(s)">
+          {{ strangerKilling.has(s.pid) ? '结束中...' : '结束进程' }}
+        </button>
+        <button class="btn btn-secondary btn-sm" @click="dismissStranger(s)">忽略</button>
       </div>
     </div>
 
@@ -491,13 +568,12 @@ onUnmounted(() => {
                 <div class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted)">{{ g.active.version }}</div>
               </template>
               <template v-else>
-                <select class="version-sel mt-1"
-                        :value="g.active.id"
-                        @change="selectedByKind[g.kind] = ($event.target as HTMLSelectElement).value">
-                  <option v-for="s in g.all" :key="s.id" :value="s.id">
-                    {{ g.running?.id === s.id ? '● ' : '' }}v{{ s.version }} [{{ originShort(s) }}]
-                  </option>
-                </select>
+                <SelectMenu
+                  :model-value="g.active.id"
+                  :options="g.all.map((s) => ({ label: versionOptionLabel(s, g.running), value: s.id }))"
+                  trigger-class="version-sel version-sel-btn mt-1"
+                  @update:modelValue="selectedByKind[g.kind] = String($event)"
+                />
               </template>
             </div>
             <span class="w-2 h-2 rounded-full shrink-0 mt-1.5 transition-all duration-300"
@@ -544,11 +620,12 @@ onUnmounted(() => {
         <div class="flex items-center gap-2 mb-3 pb-3"
              style="border-bottom: 1px solid var(--border-color)">
           <span class="text-[12px] shrink-0" style="color: var(--text-muted)">全局 CLI:</span>
-          <select class="version-sel" v-model="globalPhpPick">
-            <option v-for="p in phpServices" :key="p.id" :value="p.version">
-              v{{ p.version }}{{ p.variant ? ' '+p.variant : '' }} [{{ originShort(p) }}]
-            </option>
-          </select>
+          <SelectMenu
+            v-if="phpServices.length > 0"
+            v-model="globalPhpPick"
+            :options="phpServices.map((p) => ({ label: phpOptionLabel(p), value: p.version }))"
+            trigger-class="version-sel version-sel-btn"
+          />
           <span v-if="globalPhp.version" class="text-[11px]" style="color: var(--text-muted)">
             当前: v{{ globalPhp.version }}
           </span>
@@ -600,7 +677,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-1.5 mb-3">
+        <div class="flex flex-wrap items-center gap-1.5">
           <div v-for="p in phpServices" :key="p.id"
                class="php-chip"
                :class="{ 'is-running': isRunning(p) }">
@@ -611,10 +688,6 @@ onUnmounted(() => {
             <span class="font-mono">{{ p.version }}{{ p.variant ? ' '+p.variant : '' }}</span>
             <span class="opacity-50 text-[9px]">{{ originShort(p) }}</span>
           </div>
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-success btn-sm" @click="startAllPhp">全部启动</button>
-          <button class="btn btn-danger btn-sm" @click="stopAllPhp">全部停止</button>
         </div>
       </div>
 
@@ -724,28 +797,6 @@ onUnmounted(() => {
   color: var(--text-primary);
   border-color: var(--text-muted);
 }
-/* 多版本下拉：小 pill，明显是个能点的东西 */
-.version-sel {
-  font-size: 12px;
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 2px 20px 2px 8px;
-  outline: none;
-  cursor: pointer;
-  max-width: 100%;
-  -webkit-appearance: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%23888' stroke-width='1.3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  transition: border-color 150ms ease, background-color 150ms ease;
-}
-.version-sel:hover { border-color: var(--text-muted); background: var(--bg-hover); }
-.version-sel:focus { border-color: var(--color-blue-light); }
-.version-sel option { background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; }
-
 /* PHP version chips */
 .php-chip {
   display: inline-flex;
@@ -763,6 +814,17 @@ onUnmounted(() => {
   background: rgba(74, 222, 128, 0.08);
   border-color: rgba(74, 222, 128, 0.25);
   color: var(--color-success-light);
+}
+
+/* 外部进程提醒条 */
+.stranger-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 /* 更新提醒横条 */
@@ -812,6 +874,18 @@ onUnmounted(() => {
 .cta-card:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* 版本下拉：默认会被 flex-1 父容器撑满，限制成内容宽度 + 上限 */
+:deep(.rs-select.version-sel) {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+}
+:deep(.rs-select-trigger.version-sel-btn) {
+  width: auto;
+  min-width: 110px;
+  max-width: 180px;
 }
 
 /* Skeleton 占位：首次加载前显示，shimmer 动画提示"正在准备" */

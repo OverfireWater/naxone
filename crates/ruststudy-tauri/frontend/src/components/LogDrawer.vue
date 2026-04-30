@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { X, Trash2, FolderOpen, RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, Copy } from "lucide-vue-next";
 import { toast } from "../composables/useToast";
+import SelectMenu from "./SelectMenu.vue";
 
 interface LogEntry {
   id: number;
@@ -21,6 +22,24 @@ const logs = ref<LogEntry[]>([]);
 const levelFilter = ref<string>("");
 const categoryFilter = ref<string>("");
 const expandedIds = ref<Set<number>>(new Set());
+
+const levelOptions = [
+  { label: "全部级别", value: "" },
+  { label: "调试+", value: "debug" },
+  { label: "信息+", value: "info" },
+  { label: "成功+", value: "success" },
+  { label: "警告+", value: "warn" },
+  { label: "错误", value: "error" },
+];
+const categoryOptions = [
+  { label: "全部分类", value: "" },
+  { label: "服务", value: "service" },
+  { label: "站点", value: "vhost" },
+  { label: "配置", value: "config" },
+  { label: "扩展", value: "extension" },
+  { label: "设置", value: "settings" },
+  { label: "系统", value: "system" },
+];
 
 let timer: number | null = null;
 let lastId = 0;
@@ -160,23 +179,8 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
         </div>
 
         <div class="flex items-center gap-2 px-4 py-2 border-b" style="border-color: var(--border-color)">
-          <select class="input sel" style="width: 110px; padding: 4px 24px 4px 8px; font-size: 12px" v-model="levelFilter">
-            <option value="">全部级别</option>
-            <option value="debug">调试+</option>
-            <option value="info">信息+</option>
-            <option value="success">成功+</option>
-            <option value="warn">警告+</option>
-            <option value="error">错误</option>
-          </select>
-          <select class="input sel" style="width: 110px; padding: 4px 24px 4px 8px; font-size: 12px" v-model="categoryFilter">
-            <option value="">全部分类</option>
-            <option value="service">服务</option>
-            <option value="vhost">站点</option>
-            <option value="config">配置</option>
-            <option value="extension">扩展</option>
-            <option value="settings">设置</option>
-            <option value="system">系统</option>
-          </select>
+          <SelectMenu v-model="levelFilter" :options="levelOptions" trigger-class="input" />
+          <SelectMenu v-model="categoryFilter" :options="categoryOptions" trigger-class="input" />
           <button class="btn btn-secondary btn-sm !px-2" @click="loadLogs(true)" title="刷新"><RefreshCw :size="13" /></button>
           <button class="btn btn-secondary btn-sm !px-2" @click="openLogDir" title="打开日志目录"><FolderOpen :size="13" /></button>
           <button class="btn btn-secondary btn-sm !px-2" @click="clearLogs" title="清空"><Trash2 :size="13" /></button>

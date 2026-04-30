@@ -10,11 +10,14 @@ impl PlatformOps for LinuxPlatform {
         PathBuf::from("/etc/hosts")
     }
 
-    fn add_hosts_entry(&self, _hostname: &str, _ip: &str) -> Result<()> {
-        Err(RustStudyError::Process("Linux support not yet implemented".into()))
-    }
-
-    fn remove_hosts_entry(&self, _hostname: &str) -> Result<()> {
+    fn apply_hosts_changes(
+        &self,
+        additions: &[(String, String)],
+        removals: &[String],
+    ) -> Result<()> {
+        if additions.is_empty() && removals.is_empty() {
+            return Ok(());
+        }
         Err(RustStudyError::Process("Linux support not yet implemented".into()))
     }
 

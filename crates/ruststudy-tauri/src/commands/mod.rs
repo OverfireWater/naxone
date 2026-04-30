@@ -4,6 +4,7 @@ pub mod package;
 pub mod php;
 pub mod service;
 pub mod service_config;
+pub mod strangers;
 pub mod settings;
 pub mod updater;
 pub mod utils;

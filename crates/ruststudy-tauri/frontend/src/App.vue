@@ -45,7 +45,7 @@ async function close() { await appWindow.close(); }
 </script>
 
 <template>
-  <div class="flex flex-col h-screen">
+  <div class="app-shell flex flex-col h-screen">
     <div class="flex items-center justify-between h-9 shrink-0 border-b"
          style="background: var(--bg-titlebar); border-color: var(--border-color)">
       <div class="flex-1 h-full flex items-center gap-2.5 pl-4 titlebar-drag" data-tauri-drag-region>
@@ -70,8 +70,8 @@ async function close() { await appWindow.close(); }
       </div>
     </div>
 
-    <div class="flex flex-1 overflow-hidden">
-      <aside class="flex flex-col shrink-0 transition-all duration-300 ease-in-out border-r"
+    <div class="flex flex-1 overflow-hidden titlebar-no-drag">
+      <aside class="flex flex-col shrink-0 transition-all duration-300 ease-in-out border-r titlebar-no-drag"
              :class="collapsed ? 'w-[60px]' : 'w-[220px]'"
              style="background: var(--bg-secondary); border-color: var(--border-color)">
         <nav class="flex-1 p-3 flex flex-col gap-1 mt-1">
@@ -110,7 +110,7 @@ async function close() { await appWindow.close(); }
         </div>
       </aside>
 
-      <main class="flex-1 overflow-y-auto px-5 py-4" style="background: var(--bg-primary)">
+      <main class="flex-1 overflow-y-auto px-5 py-4 titlebar-no-drag" style="background: var(--bg-primary)">
         <router-view />
       </main>
     </div>

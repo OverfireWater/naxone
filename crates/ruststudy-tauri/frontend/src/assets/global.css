@@ -209,14 +209,18 @@
   .modal-tab.active { color: var(--text-primary); border-bottom-color: var(--color-blue); }
 }
 
-.titlebar-drag,
-*[data-tauri-drag-region] {
-  app-region: drag;
+.app-shell {
+  app-region: no-drag;
 }
 
 .titlebar-no-drag,
 .titlebar-no-drag * {
-  app-region: no-drag;
+  app-region: no-drag !important;
+}
+
+.titlebar-drag,
+*[data-tauri-drag-region] {
+  app-region: drag !important;
 }
 
 @layer utilities { .transition-theme { transition: all var(--transition); } }

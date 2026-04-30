@@ -117,6 +117,19 @@ cargo tauri build
 
 生成的安装包在 `target/release/bundle/` 目录。
 
+### 发布到 Gitee Release
+
+```bash
+# 先准备 token（不要提交到仓库）
+export GITEE_TOKEN=...
+
+# 或者先 source 本地忽略文件
+source release.env.local
+
+# 构建后上传当前版本的安装包
+python scripts/release_gitee.py
+```
+
 ### 运行测试
 
 ```bash

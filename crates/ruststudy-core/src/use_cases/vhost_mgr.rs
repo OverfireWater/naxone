@@ -24,8 +24,8 @@ enum RollbackAction {
         path: PathBuf,
         original: Option<String>,
     },
-    /// 删除此前加入的 hosts 条目
-    RemoveHostsEntry { hostname: String },
+    /// 撤销 hosts 批量追加：一次性把这些 hostname 从 hosts 中删除
+    RevertHostsAdditions { hostnames: Vec<String> },
 }
 
 struct Rollback<'a> {
@@ -58,12 +58,12 @@ impl<'a> Rollback<'a> {
         Ok(())
     }
 
-    fn add_hosts(&mut self, hostname: &str, ip: &str) -> Result<()> {
-        self.platform_ops.add_hosts_entry(hostname, ip)?;
-        self.actions.push(RollbackAction::RemoveHostsEntry {
-            hostname: hostname.to_string(),
-        });
-        Ok(())
+    /// 记录一批已成功追加的 hostname，回滚时一次性删除（最多再触发一次 UAC）。
+    fn record_hosts_additions(&mut self, hostnames: Vec<String>) {
+        if !hostnames.is_empty() {
+            self.actions
+                .push(RollbackAction::RevertHostsAdditions { hostnames });
+        }
     }
 
     /// 成功提交：抛弃所有补偿动作
@@ -84,9 +84,9 @@ impl<'a> Rollback<'a> {
                         tracing::warn!("回滚文件 {} 失败: {}", path.display(), e);
                     }
                 }
-                RollbackAction::RemoveHostsEntry { hostname } => {
-                    if let Err(e) = self.platform_ops.remove_hosts_entry(&hostname) {
-                        tracing::warn!("回滚 hosts 条目 {} 失败: {}", hostname, e);
+                RollbackAction::RevertHostsAdditions { hostnames } => {
+                    if let Err(e) = self.platform_ops.apply_hosts_changes(&[], &hostnames) {
+                        tracing::warn!("回滚 hosts 批量追加失败: {}", e);
                     }
                 }
             }
@@ -114,9 +114,9 @@ impl VhostManager {
     pub async fn create_vhost(
         &self,
         vhost: &VirtualHost,
-        nginx_vhosts_dir: &Path,
-        apache_vhosts_dir: &Path,
-        apache_listen_conf: &Path,
+        nginx_vhosts_dir: Option<&Path>,
+        apache_vhosts_dir: Option<&Path>,
+        apache_listen_conf: Option<&Path>,
         running_web_server: Option<&ServiceInstance>,
     ) -> Result<()> {
         let mut rb = Rollback::new(self.config_io.as_ref(), self.platform_ops.as_ref());
@@ -146,21 +146,25 @@ impl VhostManager {
     async fn write_vhost_with_rollback(
         &self,
         vhost: &VirtualHost,
-        nginx_vhosts_dir: &Path,
-        apache_vhosts_dir: &Path,
-        apache_listen_conf: &Path,
+        nginx_vhosts_dir: Option<&Path>,
+        apache_vhosts_dir: Option<&Path>,
+        apache_listen_conf: Option<&Path>,
         running_web_server: Option<&ServiceInstance>,
         rb: &mut Rollback<'_>,
     ) -> Result<()> {
         let filename = vhost.config_filename();
 
         // 1. Nginx vhost 配置
-        let nginx_conf = self.template_engine.render_nginx_vhost(vhost)?;
-        rb.write_text(&nginx_vhosts_dir.join(&filename), &nginx_conf)?;
+        if let Some(nginx_vhosts_dir) = nginx_vhosts_dir {
+            let nginx_conf = self.template_engine.render_nginx_vhost(vhost)?;
+            rb.write_text(&nginx_vhosts_dir.join(&filename), &nginx_conf)?;
+        }
 
         // 2. Apache vhost 配置
-        let apache_conf = self.template_engine.render_apache_vhost(vhost)?;
-        rb.write_text(&apache_vhosts_dir.join(&filename), &apache_conf)?;
+        if let Some(apache_vhosts_dir) = apache_vhosts_dir {
+            let apache_conf = self.template_engine.render_apache_vhost(vhost)?;
+            rb.write_text(&apache_vhosts_dir.join(&filename), &apache_conf)?;
+        }
 
         // 3. 伪静态规则（.htaccess / nginx.htaccess），文档根目录可能被用户独占，失败不回滚全量
         let nginx_htaccess = vhost.document_root.join("nginx.htaccess");
@@ -179,28 +183,31 @@ impl VhostManager {
 
         // 4. Apache Listen.conf
         if vhost.listen_port != 80 {
-            self.add_listen_port_tracked(apache_listen_conf, vhost.listen_port, rb)?;
+            if let Some(apache_listen_conf) = apache_listen_conf {
+                self.add_listen_port_tracked(apache_listen_conf, vhost.listen_port, rb)?;
+            }
         }
 
-        // 5. hosts 文件
+        // 5. hosts 文件：一次性批量写入。Windows 在非管理员下会弹一次 UAC。
         if vhost.sync_hosts {
-            if let Err(e) = rb.add_hosts(&vhost.server_name, "127.0.0.1") {
-                // 权限类错误给专用提示
+            let mut adds: Vec<(String, String)> =
+                vec![(vhost.server_name.clone(), "127.0.0.1".to_string())];
+            for alias in &vhost.aliases {
+                if !alias.is_empty() {
+                    adds.push((alias.clone(), "127.0.0.1".to_string()));
+                }
+            }
+            if let Err(e) = self.platform_ops.apply_hosts_changes(&adds, &[]) {
                 let msg = match &e {
                     RustStudyError::PermissionDenied(_) => format!(
-                        "hosts 文件写入失败（请以管理员身份运行 RustStudy）: {}",
+                        "hosts 文件写入被拒绝（请在 UAC 弹窗中点【是】，或以管理员身份运行 RustStudy）: {}",
                         e
                     ),
                     _ => format!("hosts 文件写入失败: {}", e),
                 };
                 return Err(RustStudyError::Config(msg));
             }
-            for alias in &vhost.aliases {
-                if !alias.is_empty() {
-                    // alias 失败允许跳过（不影响主站）
-                    let _ = rb.add_hosts(alias, "127.0.0.1");
-                }
-            }
+            rb.record_hosts_additions(adds.into_iter().map(|(h, _)| h).collect());
         }
 
         // 6. Reload web server。失败必须回滚所有之前的写入。
@@ -219,16 +226,15 @@ impl VhostManager {
         &self,
         old: &VirtualHost,
         new: &VirtualHost,
-        nginx_vhosts_dir: &Path,
-        apache_vhosts_dir: &Path,
-        apache_listen_conf: &Path,
+        nginx_vhosts_dir: Option<&Path>,
+        apache_vhosts_dir: Option<&Path>,
+        apache_listen_conf: Option<&Path>,
         all_vhosts: &[VirtualHost],
         running_web_server: Option<&ServiceInstance>,
     ) -> Result<()> {
         let old_filename = old.config_filename();
         let new_filename = new.config_filename();
 
-        // 1. 写新配置（带回滚）
         self.create_vhost(
             new,
             nginx_vhosts_dir,
@@ -238,24 +244,30 @@ impl VhostManager {
         )
         .await?;
 
-        // 2. 新配置落盘成功：清理旧文件（best-effort）
         if old_filename != new_filename {
-            let _ = self.config_io.delete(&nginx_vhosts_dir.join(&old_filename));
-            let _ = self.config_io.delete(&apache_vhosts_dir.join(&old_filename));
+            if let Some(nginx_vhosts_dir) = nginx_vhosts_dir {
+                let _ = self.config_io.delete(&nginx_vhosts_dir.join(&old_filename));
+            }
+            if let Some(apache_vhosts_dir) = apache_vhosts_dir {
+                let _ = self.config_io.delete(&apache_vhosts_dir.join(&old_filename));
+            }
 
-            let _ = self.platform_ops.remove_hosts_entry(&old.server_name);
+            let mut removals: Vec<String> = vec![old.server_name.clone()];
             for alias in &old.aliases {
                 if !alias.is_empty() {
-                    let _ = self.platform_ops.remove_hosts_entry(alias);
+                    removals.push(alias.clone());
                 }
             }
+            let _ = self.platform_ops.apply_hosts_changes(&[], &removals);
 
             if old.listen_port != 80 && old.listen_port != new.listen_port {
                 let port_still_used = all_vhosts
                     .iter()
                     .any(|v| v.id != old.id && v.listen_port == old.listen_port);
                 if !port_still_used {
-                    let _ = self.remove_listen_port(apache_listen_conf, old.listen_port);
+                    if let Some(apache_listen_conf) = apache_listen_conf {
+                        let _ = self.remove_listen_port(apache_listen_conf, old.listen_port);
+                    }
                 }
             }
         }
@@ -267,38 +279,40 @@ impl VhostManager {
     pub async fn delete_vhost(
         &self,
         vhost: &VirtualHost,
-        nginx_vhosts_dir: &Path,
-        apache_vhosts_dir: &Path,
-        apache_listen_conf: &Path,
+        nginx_vhosts_dir: Option<&Path>,
+        apache_vhosts_dir: Option<&Path>,
+        apache_listen_conf: Option<&Path>,
         all_vhosts: &[VirtualHost],
         running_web_server: Option<&ServiceInstance>,
     ) -> Result<()> {
         let filename = vhost.config_filename();
 
-        // 1. Delete config files
-        let _ = self.config_io.delete(&nginx_vhosts_dir.join(&filename));
-        let _ = self.config_io.delete(&apache_vhosts_dir.join(&filename));
+        if let Some(nginx_vhosts_dir) = nginx_vhosts_dir {
+            let _ = self.config_io.delete(&nginx_vhosts_dir.join(&filename));
+        }
+        if let Some(apache_vhosts_dir) = apache_vhosts_dir {
+            let _ = self.config_io.delete(&apache_vhosts_dir.join(&filename));
+        }
 
-        // 2. Remove from Listen.conf if no other vhost uses this port
         if vhost.listen_port != 80 {
             let port_still_used = all_vhosts
                 .iter()
                 .any(|v| v.id != vhost.id && v.listen_port == vhost.listen_port);
             if !port_still_used {
-                self.remove_listen_port(apache_listen_conf, vhost.listen_port)?;
+                if let Some(apache_listen_conf) = apache_listen_conf {
+                    self.remove_listen_port(apache_listen_conf, vhost.listen_port)?;
+                }
             }
         }
 
-        // 3. Remove hosts entries (best-effort, requires admin)
-        let _ = self.platform_ops.remove_hosts_entry(&vhost.server_name);
+        let mut removals: Vec<String> = vec![vhost.server_name.clone()];
         for alias in &vhost.aliases {
             if !alias.is_empty() {
-                let _ = self.platform_ops.remove_hosts_entry(alias);
+                removals.push(alias.clone());
             }
         }
+        let _ = self.platform_ops.apply_hosts_changes(&[], &removals);
 
-        // 注意：不在这里 reload。命令层拿到 Ok 后自己调 reload_web_server，
-        // 这样 reload 失败能**独立处理**——物理删除已完成，不应被视为"整个删除失败"。
         let _ = running_web_server;
 
         Ok(())

@@ -87,21 +87,13 @@ impl AppState {
             cfg
         };
 
-        // 迁移：早期版本默认把 www_root 指向 PHPStudy 的 WWW。现在 RustStudy
-        // 应该放自己目录——优先 exe 同级（便携），fallback 到 %APPDATA%\RustStudy\www
-        if let Some(ps_path) = &config.general.phpstudy_path {
-            let old_default = ps_path.join("WWW");
-            if config.general.www_root == old_default {
-                let new_root = resolve_default_www_root();
-                tracing::info!(
-                    old = ?config.general.www_root,
-                    new = ?new_root,
-                    "迁移 www_root 到 RustStudy 自建目录"
-                );
-                config.general.www_root = new_root;
-                let _ = config.save(&cfg_path);
-            }
+        let resolved_www_root = resolve_default_www_root();
+        if config.general.www_root == legacy_default_www_root() {
+            config.general.www_root = resolved_www_root.clone();
+            let _ = config.save(&cfg_path);
         }
+
+        // 保持 RustStudy 自己管理默认站点目录，不再自动改回 PHPStudy 的 WWW。
 
         // 确保 www_root 目录存在（新建站点时默认指向它，空目录也无妨）
         let _ = std::fs::create_dir_all(&config.general.www_root);
@@ -282,6 +274,11 @@ pub fn resolve_log_dir(config: &AppConfig) -> PathBuf {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
         .join("logs")
+}
+
+fn legacy_default_www_root() -> PathBuf {
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
+    PathBuf::from(home).join(".ruststudy").join("www")
 }
 
 pub fn vhosts_json_path() -> PathBuf {

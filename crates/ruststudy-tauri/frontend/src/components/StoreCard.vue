@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { CheckCircle2, Download, AlertCircle, Trash2 } from "lucide-vue-next";
+import SelectMenu from "./SelectMenu.vue";
 
 interface PackageVersion {
   version: string;
@@ -45,6 +46,10 @@ let unlisten: UnlistenFn | null = null;
 const isSelectedInstalled = computed(() => props.installedVersions.includes(selectedVersion.value));
 const currentVersion = computed(() => props.pkg.versions.find(v => v.version === selectedVersion.value));
 const isBusy = computed(() => phase.value === "starting" || phase.value === "downloading" || phase.value === "extracting");
+const versionOptions = computed(() => props.pkg.versions.map((v) => ({
+  label: `v${v.version}${v.variant ? ` · ${v.variant}` : ""}${props.installedVersions.includes(v.version) ? " · 已安装" : ""}`,
+  value: v.version,
+})));
 
 async function doInstall() {
   if (isBusy.value || isSelectedInstalled.value) return;
@@ -174,12 +179,7 @@ watch(selectedVersion, () => {
     </div>
 
     <div class="flex items-center gap-2 mb-3">
-      <select class="input sel flex-1" v-model="selectedVersion" :disabled="isBusy">
-        <option v-for="v in pkg.versions" :key="v.version" :value="v.version">
-          v{{ v.version }}<template v-if="v.variant"> · {{ v.variant }}</template>
-          <template v-if="installedVersions.includes(v.version)"> · 已安装</template>
-        </option>
-      </select>
+      <SelectMenu v-model="selectedVersion" :options="versionOptions" :disabled="isBusy" full-width trigger-class="input" />
       <span v-if="currentVersion?.size_mb" class="text-[11px] font-mono shrink-0" style="color: var(--text-muted)">~{{ currentVersion.size_mb }}MB</span>
     </div>
 

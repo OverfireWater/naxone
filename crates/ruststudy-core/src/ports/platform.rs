@@ -7,11 +7,15 @@ pub trait PlatformOps: Send + Sync {
     /// Path to the system hosts file
     fn hosts_file_path(&self) -> PathBuf;
 
-    /// Add an entry to the hosts file
-    fn add_hosts_entry(&self, hostname: &str, ip: &str) -> Result<()>;
-
-    /// Remove an entry from the hosts file
-    fn remove_hosts_entry(&self, hostname: &str) -> Result<()>;
+    /// 批量更新 hosts 文件：一次性应用 additions（追加）+ removals（删除）。
+    /// Windows 实现会在权限不足时自动通过 UAC 提权一次性写入，避免多次弹框。
+    /// `additions`: (hostname, ip) 列表
+    /// `removals`: hostname 列表
+    fn apply_hosts_changes(
+        &self,
+        additions: &[(String, String)],
+        removals: &[String],
+    ) -> Result<()>;
 
     /// Get the default data directory for RustStudy
     fn data_dir(&self) -> PathBuf;

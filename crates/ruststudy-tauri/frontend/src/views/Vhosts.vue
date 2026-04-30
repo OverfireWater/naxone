@@ -2,8 +2,9 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Pencil, Trash2, ExternalLink, FolderOpen } from "lucide-vue-next";
 import { toast } from "../composables/useToast";
+import SelectMenu from "../components/SelectMenu.vue";
+import { Pencil, ExternalLink, FolderOpen, Trash2 } from "lucide-vue-next";
 
 interface VhostInfo {
   id: string; server_name: string; aliases: string[]; listen_port: number;
@@ -32,6 +33,15 @@ const rewritePresets = [
   { label: "WordPress", value: "location / {\n    try_files $uri $uri/ /index.php?$args;\n}" },
   { label: "自定义", value: "__custom__" },
 ];
+const boolOptions = [
+  { label: "关闭", value: false },
+  { label: "开启", value: true },
+];
+const phpVersionOptions = computed(() => [
+  { label: "不使用 PHP", value: null },
+  ...phpVersions.value.map((pv) => ({ label: `${pv.label} (:${pv.port})`, value: pv.version })),
+]);
+const rewritePresetOptions = rewritePresets.map((preset) => ({ label: preset.label, value: preset.value }));
 
 const vhosts = ref<VhostInfo[]>([]);
 const phpVersions = ref<PhpVersionInfo[]>([]);
@@ -147,18 +157,10 @@ async function openDir(vh: VhostInfo) {
 async function saveVhost() {
   if (!form.value.server_name.trim()) { showError("域名不能为空"); return; }
   if (!form.value.document_root.trim()) { showError("网站目录不能为空"); return; }
-  // Validate directory exists
-  const exists = await invoke<boolean>("dir_exists", { path: form.value.document_root });
-  if (!exists) { showError("网站目录不存在: " + form.value.document_root); return; }
   // Check duplicate domain:port
   const newId = `${form.value.server_name}_${form.value.listen_port}`;
   const dup = vhosts.value.find(v => v.id === newId && v.id !== editingId.value);
   if (dup) { showError(`站点 ${form.value.server_name}:${form.value.listen_port} 已存在`); return; }
-  // Check port availability (only for new vhosts or port change)
-  if (!editingId.value || !vhosts.value.find(v => v.id === editingId.value && v.listen_port === form.value.listen_port)) {
-    const portFree = await invoke<boolean>("check_port_available", { port: form.value.listen_port });
-    if (!portFree) { showError(`端口 ${form.value.listen_port} 已被占用`); return; }
-  }
   busy.value = true;
   try {
     const isEdit = !!editingId.value;
@@ -213,16 +215,41 @@ const filteredVhosts = computed(() => {
   );
 });
 
-// Grouped view: PHPStudy sites first, then Custom/Standalone
+// Grouped view: 自建/独立站点优先（用户自己创建的更常用），PHPStudy 站点（导入的）放下面
 interface VhostGroup { key: string; label: string; items: VhostInfo[]; }
 const groupedVhosts = computed<VhostGroup[]>(() => {
   const phpstudy = filteredVhosts.value.filter(v => v.source === "phpstudy");
   const custom = filteredVhosts.value.filter(v => v.source !== "phpstudy");
   const out: VhostGroup[] = [];
-  if (phpstudy.length) out.push({ key: "phpstudy", label: "PHPStudy 站点", items: phpstudy });
   if (custom.length) out.push({ key: "custom", label: "自建站点", items: custom });
+  if (phpstudy.length) out.push({ key: "phpstudy", label: "PHPStudy 站点", items: phpstudy });
   return out;
 });
+
+/// 把 vhost 存的 php_version（"php855nts" 这种内部 id）反查成 { v: "8.5.5", variant: "nts" }。
+/// 优先用后端 phpVersions 里的 label（权威格式），找不到再 fallback 解析。
+function phpDisplay(raw: string | null): { v: string; variant: string } | null {
+  if (!raw) return null;
+  const found = phpVersions.value.find((p) => p.version === raw);
+  if (found) {
+    // label 形如 "PHP 8.5.5" 或 "PHP 8.5.5 (nts)"
+    const m = found.label.match(/^PHP\s+(\S+)(?:\s+\((\S+)\))?/);
+    if (m) return { v: m[1], variant: (m[2] || "").toLowerCase() };
+  }
+  // Fallback：vhost 引用了已删除/外部的 PHP 版本，直接按 "php{digits}{variant}" 解
+  const m = raw.match(/^php(\d+)(nts|ts)?$/i);
+  if (m) {
+    const d = m[1];
+    const v =
+      d.length === 3
+        ? `${d[0]}.${d[1]}.${d[2]}`
+        : d.length >= 4
+          ? `${d[0]}.${d[1]}.${d.slice(2)}`
+          : d;
+    return { v, variant: (m[2] || "").toLowerCase() };
+  }
+  return { v: raw, variant: "" };
+}
 
 function sourceBadge(v: VhostInfo): { text: string; color: string } | null {
   if (v.source === "phpstudy") return { text: "PS", color: "#8b5cf6" };
@@ -251,8 +278,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
 <template>
   <div class="max-w-[960px]">
     <!-- Header -->
-    <div class="flex items-center justify-between mb-3">
-      <h1 class="text-base font-semibold">虚拟主机</h1>
+    <div class="flex items-center justify-end mb-3">
       <div class="flex items-center gap-2">
         <input class="input" style="width: 200px" v-model="searchQuery" placeholder="搜索站点..." />
         <button class="btn btn-success btn-sm" @click="openCreate" :disabled="busy">+ 新建站点</button>
@@ -285,7 +311,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           <div class="fg"><label>端口</label><input class="input" type="number" v-model.number="form.listen_port" min="1" max="65535" /></div>
           <div class="fg full"><label>域名别名 <span style="color:var(--text-muted);font-weight:400">多个用空格分隔</span></label><input class="input" v-model="form.aliases" placeholder="www.example.test" /></div>
           <div class="fg full"><label>网站目录 <span style="color:var(--color-danger)">*</span></label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.document_root" @input="docRootTouched = true" :placeholder="wwwRoot ? wwwRoot + '/mysite' : '/path/to/site'" /><button class="btn btn-secondary btn-sm" @click="browseFolder">浏览</button></div></div>
-          <div class="fg"><label>PHP 版本</label><select class="input sel" v-model="form.php_version"><option :value="null">不使用 PHP</option><option v-for="pv in phpVersions" :key="pv.version" :value="pv.version">{{ pv.label }} (:{{ pv.port }})</option></select></div>
+          <div class="fg"><label>PHP 版本</label><SelectMenu v-model="form.php_version" :options="phpVersionOptions" full-width trigger-class="input" /></div>
           <div class="fg"><label>默认首页</label><input class="input" v-model="form.index_files" placeholder="index.php index.html" /></div>
           <div class="fg"><label>到期日期 <span style="color:var(--text-muted);font-weight:400">留空永不过期</span></label><input class="input" type="date" v-model="form.expires_at" /></div>
           <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">同步 Hosts</span><label class="toggle-wrap"><input type="checkbox" v-model="form.sync_hosts" /><span class="toggle-slider"></span></label></div>
@@ -293,8 +319,8 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
 
         <!-- Tab: 伪静态 -->
         <div v-show="modalTab === 'rewrite'" class="grid grid-cols-2 gap-3">
-          <div class="fg"><label>伪静态预设</label><select class="input sel" :value="rewritePreset" @change="onRewritePresetChange(($event.target as HTMLSelectElement).value)"><option v-for="p in rewritePresets" :key="p.label" :value="p.value">{{ p.label }}</option></select></div>
-          <div class="fg"><label>目录浏览</label><select class="input sel" v-model="form.autoindex"><option :value="false">关闭</option><option :value="true">开启</option></select></div>
+          <div class="fg"><label>伪静态预设</label><SelectMenu :model-value="rewritePreset" :options="rewritePresetOptions" full-width trigger-class="input" @update:modelValue="onRewritePresetChange(String($event))" /></div>
+          <div class="fg"><label>目录浏览</label><SelectMenu v-model="form.autoindex" :options="boolOptions" full-width trigger-class="input" /></div>
           <div class="fg full"><label>伪静态规则 <span style="color:var(--text-muted);font-weight:400">选择预设自动填充，可手动修改</span></label><textarea class="input resize-y font-mono text-xs min-h-[180px]" v-model="form.rewrite_rule" rows="5" placeholder="try_files $uri $uri/ /index.php?$query_string;"></textarea></div>
         </div>
 
@@ -313,7 +339,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           </div>
           <div class="fg"><label>证书路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_cert" placeholder="*.pem / *.crt" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_cert')">浏览</button></div></div>
           <div class="fg"><label>密钥路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_key" placeholder="*.key" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_key')">浏览</button></div></div>
-          <div class="fg"><label>强制 HTTPS</label><select class="input sel" v-model="form.force_https"><option :value="false">关闭</option><option :value="true">开启</option></select></div>
+          <div class="fg"><label>强制 HTTPS</label><SelectMenu v-model="form.force_https" :options="boolOptions" full-width trigger-class="input" /></div>
           <div class="fg"><label>日志路径</label><input class="input" v-model="form.access_log" placeholder="留空使用默认" /></div>
           <div class="fg full"><label>自定义 Nginx 指令</label><textarea class="input resize-y font-mono text-xs min-h-[140px]" v-model="form.custom_directives" rows="4" placeholder="proxy_pass http://127.0.0.1:3000;"></textarea></div>
         </div>
@@ -359,7 +385,10 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
         <div class="w-14 shrink-0 text-[13px] font-mono" style="color: var(--text-muted)">{{ vh.listen_port }}</div>
         <div class="flex-1 min-w-0 text-[13px] truncate pr-3" style="color: var(--text-secondary)" :title="vh.document_root">{{ vh.document_root }}</div>
         <div class="w-20 shrink-0 text-center">
-          <span v-if="vh.php_version" class="text-[12px] px-2 py-0.5 rounded" style="background: var(--bg-tertiary); color: var(--text-secondary)">{{ vh.php_version }}</span>
+          <template v-if="phpDisplay(vh.php_version)">
+            <span class="text-[12px] font-mono" style="color: var(--text-secondary)">{{ phpDisplay(vh.php_version)!.v }}</span>
+            <span v-if="phpDisplay(vh.php_version)!.variant" class="text-[10px] ml-0.5" style="color: var(--text-muted)">{{ phpDisplay(vh.php_version)!.variant }}</span>
+          </template>
           <span v-else class="text-[12px]" style="color: var(--text-muted)">-</span>
         </div>
         <div class="w-20 shrink-0 text-center text-[12px]" :style="{ color: isExpired(vh) ? 'var(--color-danger)' : 'var(--text-muted)' }">{{ vh.expires_at ? (isExpired(vh) ? '已过期' : formatDate(vh.expires_at)) : '永久' }}</div>

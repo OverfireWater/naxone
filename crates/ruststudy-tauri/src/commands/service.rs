@@ -301,6 +301,16 @@ pub async fn start_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, S
     let active_web = config.web_server.active.clone();
     drop(config);
 
+    push_log(
+        &state,
+        LogLevel::Info,
+        "service",
+        format!("全部启动：开始（活跃 web = {}）", active_web),
+        None,
+        None,
+    )
+    .await;
+
     let mut errors = Vec::new();
 
     for idx in 0..working.len() {
@@ -309,6 +319,23 @@ pub async fn start_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, S
             ServiceKind::Nginx if active_web != "nginx" => continue,
             ServiceKind::Apache if active_web != "apache" => continue,
             _ => {}
+        }
+
+        // 同 kind 多版本（除 PHP 外）只启动一个：之前迭代里同类已经跑起来就跳过本版本，
+        // 避免端口冲突导致 exit code 1 的迷惑失败日志。PHP 多端口可共存，不限制。
+        if kind != ServiceKind::Php {
+            let target_id = working[idx].id();
+            let same_kind_running = working
+                .iter()
+                .any(|s| s.kind == kind && s.id() != target_id && s.status.is_running());
+            if same_kind_running {
+                tracing::info!(
+                    service = working[idx].kind.display_name(),
+                    version = %working[idx].version,
+                    "全部启动跳过：同类其他版本已在运行"
+                );
+                continue;
+            }
         }
 
         let mut target = working[idx].clone();
@@ -350,6 +377,28 @@ pub async fn start_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, S
         sync_all_statuses(&mut services, &working);
     }
 
+    if errors.is_empty() {
+        push_log(
+            &state,
+            LogLevel::Success,
+            "service",
+            "全部启动：完成",
+            None,
+            None,
+        )
+        .await;
+    } else {
+        push_log(
+            &state,
+            LogLevel::Warn,
+            "service",
+            format!("全部启动：完成（{} 个失败）", errors.len()),
+            Some(errors.join("\n")),
+            None,
+        )
+        .await;
+    }
+
     let services = state.services.read().await;
     let infos = all_infos(&services);
     drop(services);
@@ -361,13 +410,47 @@ pub async fn start_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, S
     }
 }
 
+/// 给前端按钮（如手动刷新）写一条日志的小工具命令。前端只能通过命令触发后端 push_log。
+#[tauri::command]
+pub async fn log_user_action(
+    message: String,
+    details: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    push_log(&state, LogLevel::Info, "user", message, details, None).await;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn stop_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, String> {
-    let mut working = { state.services.read().await.clone() };
-    let mut errors = Vec::new();
+    let working = { state.services.read().await.clone() };
 
-    for svc in working.iter_mut() {
-        if let Err(e) = state.service_manager.stop_service(svc).await {
+    push_log(
+        &state,
+        LogLevel::Info,
+        "service",
+        format!("全部停止：开始（{} 个服务）", working.len()),
+        None,
+        None,
+    )
+    .await;
+
+    // 并行停止：每个 stop_service 内部会优雅停 + 等端口释放，最长 ~3s。
+    // 串行下 N 个服务就要 N×3s，前端 10s 超时直接撞墙；服务互相独立可并行。
+    let mgr = state.service_manager.clone();
+    let futures = working.into_iter().map(|mut svc| {
+        let mgr = mgr.clone();
+        async move {
+            let res = mgr.stop_service(&mut svc).await;
+            (svc, res)
+        }
+    });
+    let results = futures_util::future::join_all(futures).await;
+
+    let mut working: Vec<ServiceInstance> = Vec::with_capacity(results.len());
+    let mut errors = Vec::new();
+    for (svc, res) in results {
+        if let Err(e) = res {
             let msg = format!("{} {} 停止失败: {}", svc.kind.display_name(), svc.version, e);
             errors.push(msg.clone());
             push_log(
@@ -380,11 +463,34 @@ pub async fn stop_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, St
             )
             .await;
         }
+        working.push(svc);
     }
 
     {
         let mut services = state.services.write().await;
         sync_all_statuses(&mut services, &working);
+    }
+
+    if errors.is_empty() {
+        push_log(
+            &state,
+            LogLevel::Success,
+            "service",
+            "全部停止：完成",
+            None,
+            None,
+        )
+        .await;
+    } else {
+        push_log(
+            &state,
+            LogLevel::Warn,
+            "service",
+            format!("全部停止：完成（{} 个失败）", errors.len()),
+            Some(errors.join("\n")),
+            None,
+        )
+        .await;
     }
 
     let services = state.services.read().await;

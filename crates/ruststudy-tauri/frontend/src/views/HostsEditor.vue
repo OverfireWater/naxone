@@ -76,8 +76,6 @@ onMounted(loadHosts);
 
 <template>
   <div class="max-w-[960px]">
-    <h1 class="text-base font-semibold mb-3">Hosts 编辑器</h1>
-
     <div class="card mb-3">
       <div class="flex items-center justify-between mb-2">
         <div class="text-sm font-medium text-content-secondary">系统 Hosts 文件</div>

@@ -282,15 +282,12 @@ fn build_vhost(
 // --- Helper: resolve vhost dirs ---
 
 struct VhostDirs {
-    nginx_vhosts: PathBuf,
-    apache_vhosts: PathBuf,
-    apache_listen: PathBuf,
+    nginx_vhosts: Option<PathBuf>,
+    apache_vhosts: Option<PathBuf>,
+    apache_listen: Option<PathBuf>,
 }
 
 async fn resolve_dirs(state: &AppState) -> Result<VhostDirs, String> {
-    // Prefer deriving the vhosts directories from the currently scanned services,
-    // which works for PHPStudy AND standalone/store installs. Fall back to the
-    // PHPStudy config path for backward compatibility.
     let services = state.services.read().await;
     let nginx_install = services
         .iter()
@@ -302,29 +299,32 @@ async fn resolve_dirs(state: &AppState) -> Result<VhostDirs, String> {
         .map(|s| s.install_path.clone());
     drop(services);
 
-    let (nginx_dir, apache_dir) = match (nginx_install, apache_install) {
-        (Some(n), Some(a)) => (n, a),
-        (n, a) => {
-            // Try PHPStudy fallback if either is missing from the services list
-            let config = state.config.read().await;
-            let phpstudy = config
-                .general
-                .phpstudy_path
-                .as_ref()
-                .ok_or("未检测到 Nginx 或 Apache — 请先在设置中指定 PHPStudy 路径或添加独立安装路径")?;
+    let (mut nginx_dir, mut apache_dir) = (nginx_install, apache_install);
+
+    if nginx_dir.is_none() || apache_dir.is_none() {
+        let config = state.config.read().await;
+        if let Some(phpstudy) = config.general.phpstudy_path.as_ref() {
             let ext = phpstudy.join("Extensions");
-            let nginx_dir = n.or_else(|| find_extension_dir(&ext, "Nginx"))
-                .ok_or("未找到 Nginx 安装")?;
-            let apache_dir = a.or_else(|| find_extension_dir(&ext, "Apache"))
-                .ok_or("未找到 Apache 安装")?;
-            (nginx_dir, apache_dir)
+            if nginx_dir.is_none() {
+                nginx_dir = find_extension_dir(&ext, "Nginx");
+            }
+            if apache_dir.is_none() {
+                apache_dir = find_extension_dir(&ext, "Apache");
+            }
         }
-    };
+    }
+
+    if nginx_dir.is_none() && apache_dir.is_none() {
+        return Err("未检测到可用的 Web 服务器，请先安装或扫描 Nginx / Apache".into());
+    }
 
     Ok(VhostDirs {
-        nginx_vhosts: nginx_dir.join("conf").join("vhosts"),
-        apache_vhosts: apache_dir.join("conf").join("vhosts"),
-        apache_listen: apache_dir.join("conf").join("vhosts").join("Listen.conf"),
+        nginx_vhosts: nginx_dir.map(|dir| dir.join("conf").join("vhosts")),
+        apache_vhosts: apache_dir
+            .as_ref()
+            .map(|dir| dir.join("conf").join("vhosts")),
+        apache_listen: apache_dir
+            .map(|dir| dir.join("conf").join("vhosts").join("Listen.conf")),
     })
 }
 
@@ -358,6 +358,12 @@ pub async fn create_vhost(
     let services = state.services.read().await;
     let vhost = build_vhost(&req, &state, &services);
 
+    if let Err(e) = std::fs::create_dir_all(&vhost.document_root) {
+        let msg = format!("创建网站目录失败: {}", e);
+        push_log(&state, LogLevel::Error, "vhost", format!("创建站点 {}:{} 失败", vhost.server_name, vhost.listen_port), Some(msg.clone()), None).await;
+        return Err(msg);
+    }
+
     let running_ws = VhostManager::find_running_web_server(&services);
 
     let domain_port = format!("{}:{}", vhost.server_name, vhost.listen_port);
@@ -372,7 +378,7 @@ pub async fn create_vhost(
         }
     }
 
-    match state.vhost_manager.create_vhost(&vhost, &dirs.nginx_vhosts, &dirs.apache_vhosts, &dirs.apache_listen, running_ws).await {
+    match state.vhost_manager.create_vhost(&vhost, dirs.nginx_vhosts.as_deref(), dirs.apache_vhosts.as_deref(), dirs.apache_listen.as_deref(), running_ws).await {
         Ok(_) => {
             let details = format!("文档根: {}\nPHP: {}\n伪静态: {}\nSSL: {}",
                 vhost.document_root.display(),
@@ -429,7 +435,7 @@ pub async fn update_vhost(
         }
     }
 
-    if let Err(e) = state.vhost_manager.update_vhost(&old, &new_vhost, &dirs.nginx_vhosts, &dirs.apache_vhosts, &dirs.apache_listen, &vhosts, running_ws).await {
+    if let Err(e) = state.vhost_manager.update_vhost(&old, &new_vhost, dirs.nginx_vhosts.as_deref(), dirs.apache_vhosts.as_deref(), dirs.apache_listen.as_deref(), &vhosts, running_ws).await {
         let msg = e.to_string();
         push_log(&state, LogLevel::Error, "vhost", format!("更新站点 {} 失败", domain), Some(msg.clone()), None).await;
         return Err(msg);
@@ -473,7 +479,7 @@ pub async fn delete_vhost(
     let deleted_port = vhost.listen_port;
 
     // 物理删除（.conf / hosts / listen.conf）——失败视为"整个删除失败"
-    if let Err(e) = state.vhost_manager.delete_vhost(vhost, &dirs.nginx_vhosts, &dirs.apache_vhosts, &dirs.apache_listen, &vhosts, running_ws).await {
+    if let Err(e) = state.vhost_manager.delete_vhost(vhost, dirs.nginx_vhosts.as_deref(), dirs.apache_vhosts.as_deref(), dirs.apache_listen.as_deref(), &vhosts, running_ws).await {
         let msg = e.to_string();
         push_log(&state, LogLevel::Error, "vhost", format!("删除站点 {} 失败", domain), Some(msg.clone()), None).await;
         return Err(msg);
@@ -522,34 +528,35 @@ pub async fn toggle_vhost(
     let idx = vhosts.iter().position(|v| v.id == id).ok_or("Vhost not found")?;
 
     let filename = vhosts[idx].config_filename();
-    let nginx_conf = dirs.nginx_vhosts.join(&filename);
-    let apache_conf = dirs.apache_vhosts.join(&filename);
-    let nginx_disabled = dirs.nginx_vhosts.join(format!("{}.disabled", filename));
-    let apache_disabled = dirs.apache_vhosts.join(format!("{}.disabled", filename));
-
-    // Track renamed files for rollback
     let mut renamed: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
-    if enabled {
-        if nginx_disabled.exists() {
-            if std::fs::rename(&nginx_disabled, &nginx_conf).is_ok() { renamed.push((nginx_conf.clone(), nginx_disabled.clone())); }
-        }
-        if apache_disabled.exists() {
-            if std::fs::rename(&apache_disabled, &apache_conf).is_ok() { renamed.push((apache_conf.clone(), apache_disabled.clone())); }
-        }
-    } else {
-        if nginx_conf.exists() {
-            if std::fs::rename(&nginx_conf, &nginx_disabled).is_ok() { renamed.push((nginx_disabled.clone(), nginx_conf.clone())); }
-        }
-        if apache_conf.exists() {
-            if std::fs::rename(&apache_conf, &apache_disabled).is_ok() { renamed.push((apache_disabled.clone(), apache_conf.clone())); }
+
+    if let Some(nginx_dir) = dirs.nginx_vhosts.as_ref() {
+        let conf = nginx_dir.join(&filename);
+        let disabled = nginx_dir.join(format!("{}.disabled", filename));
+        if enabled {
+            if disabled.exists() {
+                if std::fs::rename(&disabled, &conf).is_ok() { renamed.push((conf.clone(), disabled.clone())); }
+            }
+        } else if conf.exists() {
+            if std::fs::rename(&conf, &disabled).is_ok() { renamed.push((disabled.clone(), conf.clone())); }
         }
     }
 
-    // Reload web server — if fails, rollback file renames
+    if let Some(apache_dir) = dirs.apache_vhosts.as_ref() {
+        let conf = apache_dir.join(&filename);
+        let disabled = apache_dir.join(format!("{}.disabled", filename));
+        if enabled {
+            if disabled.exists() {
+                if std::fs::rename(&disabled, &conf).is_ok() { renamed.push((conf.clone(), disabled.clone())); }
+            }
+        } else if conf.exists() {
+            if std::fs::rename(&conf, &disabled).is_ok() { renamed.push((disabled.clone(), conf.clone())); }
+        }
+    }
+
     let services = state.services.read().await;
     if let Some(ws) = VhostManager::find_running_web_server(&services) {
         if let Err(e) = state.vhost_manager.reload_web_server(ws).await {
-            // Rollback
             for (from, to) in renamed.iter().rev() {
                 let _ = std::fs::rename(from, to);
             }
@@ -580,10 +587,18 @@ pub async fn check_expired_vhosts(state: State<'_, AppState>) -> Result<Vec<Vhos
             // Auto-disable expired vhost
             vh.enabled = false;
             let filename = vh.config_filename();
-            let nginx_conf = dirs.nginx_vhosts.join(&filename);
-            let apache_conf = dirs.apache_vhosts.join(&filename);
-            if nginx_conf.exists() { let _ = std::fs::rename(&nginx_conf, dirs.nginx_vhosts.join(format!("{}.disabled", filename))); }
-            if apache_conf.exists() { let _ = std::fs::rename(&apache_conf, dirs.apache_vhosts.join(format!("{}.disabled", filename))); }
+            if let Some(nginx_dir) = dirs.nginx_vhosts.as_ref() {
+                let nginx_conf = nginx_dir.join(&filename);
+                if nginx_conf.exists() {
+                    let _ = std::fs::rename(&nginx_conf, nginx_dir.join(format!("{}.disabled", filename)));
+                }
+            }
+            if let Some(apache_dir) = dirs.apache_vhosts.as_ref() {
+                let apache_conf = apache_dir.join(&filename);
+                if apache_conf.exists() {
+                    let _ = std::fs::rename(&apache_conf, apache_dir.join(format!("{}.disabled", filename)));
+                }
+            }
             changed = true;
         }
     }
