@@ -1,8 +1,8 @@
-# RustStudy
+# NaxOne
 
 > 用 Rust 重写的 PHPStudy —— 轻量、快速、现代化的本地 PHP 开发环境管理器
 
-RustStudy 是一个 Windows 桌面应用，用于替代 PHPStudy Pro，管理本地开发环境中的 Nginx / Apache / MySQL / Redis / PHP 服务。兼容现有 PHPStudy Pro 的安装目录和配置格式。
+NaxOne 是一个 Windows 桌面应用，用于替代 PHPStudy Pro，管理本地开发环境中的 Nginx / Apache / MySQL / Redis / PHP 服务。兼容现有 PHPStudy Pro 的安装目录和配置格式。
 
 ## 功能
 
@@ -51,10 +51,10 @@ RustStudy 是一个 Windows 桌面应用，用于替代 PHPStudy Pro，管理本
 ## 项目结构
 
 ```
-ruststudy/
+naxone/
 ├── Cargo.toml                    # Workspace 根配置
 ├── crates/
-│   ├── ruststudy-core/           # 核心域（平台无关）
+│   ├── naxone-core/           # 核心域（平台无关）
 │   │   └── src/
 │   │       ├── domain/           # 领域模型（Service, VirtualHost, PHP）
 │   │       ├── ports/            # 端口 Traits（ProcessManager, ConfigIO, TemplateEngine, PlatformOps）
@@ -62,7 +62,7 @@ ruststudy/
 │   │       ├── config.rs         # AppConfig（TOML 配置）
 │   │       └── error.rs          # 统一错误类型
 │   │
-│   ├── ruststudy-adapters/       # 适配器（具体实现）
+│   ├── naxone-adapters/       # 适配器（具体实现）
 │   │   └── src/
 │   │       ├── config/           # FsConfigIO（文件系统读写）
 │   │       ├── package/          # PhpStudyScanner（扫描 Extensions 目录）
@@ -71,7 +71,7 @@ ruststudy/
 │   │       ├── template/         # SimpleTemplateEngine（Nginx/Apache 配置生成）
 │   │       └── vhost/            # VhostScanner（解析现有虚拟主机）
 │   │
-│   └── ruststudy-tauri/          # Tauri 应用壳
+│   └── naxone-tauri/          # Tauri 应用壳
 │       ├── src/
 │       │   ├── main.rs           # Tauri 入口（系统托盘、插件注册）
 │       │   ├── state.rs          # AppState（依赖注入、初始化）
@@ -98,10 +98,10 @@ ruststudy/
 
 ```bash
 # 克隆项目
-cd D:\phpstudy_pro\WWW\utils\ruststudy
+cd D:\phpstudy_pro\WWW\utils\naxone
 
 # 安装前端依赖
-cd crates/ruststudy-tauri/frontend
+cd crates/naxone-tauri/frontend
 npm install
 
 # 启动开发模式（自动编译 Rust + 启动 Vite）
@@ -133,7 +133,7 @@ python scripts/release_gitee.py
 ### 运行测试
 
 ```bash
-cargo test -p ruststudy-adapters -- --nocapture
+cargo test -p naxone-adapters -- --nocapture
 ```
 
 ## 架构说明

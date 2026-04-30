@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="D:/phpstudy_pro/WWW/utils/ruststudy"
+ROOT="D:/phpstudy_pro/WWW/utils/naxone"
 LOG_DIR="$ROOT/target/stability-reports"
 TS="$(date +%Y%m%d-%H%M%S)"
 REPORT="$LOG_DIR/stability-$TS.md"
@@ -41,12 +41,12 @@ add_result() {
 
 cd "$ROOT"
 
-echo "RustStudy Stability Suite @ $TS" > "$RAW_LOG"
+echo "NaxOne Stability Suite @ $TS" > "$RAW_LOG"
 
-eval_cmd_1="cargo check -p ruststudy-tauri"
-eval_cmd_2="cargo test -p ruststudy-core"
-eval_cmd_3="cargo test -p ruststudy-adapters"
-eval_cmd_4="cd crates/ruststudy-tauri/frontend && npm run test"
+eval_cmd_1="cargo check -p naxone-tauri"
+eval_cmd_2="cargo test -p naxone-core"
+eval_cmd_3="cargo test -p naxone-adapters"
+eval_cmd_4="cd crates/naxone-tauri/frontend && npm run test"
 
 actions=(
   "Rust 编译检查|$eval_cmd_1"
@@ -66,7 +66,7 @@ for item in "${actions[@]}"; do
 done
 
 cat > "$REPORT" <<EOF
-# RustStudy Stability Report
+# NaxOne Stability Report
 
 - Time: $TS
 - Repo: $ROOT

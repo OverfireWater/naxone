@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a RustStudy release to Gitee.
+"""Publish a NaxOne release to Gitee.
 
 Usage:
   export GITEE_TOKEN=...
@@ -31,7 +31,7 @@ CARGO_TOML = ROOT / "Cargo.toml"
 DEFAULT_TOKEN_FILE = ROOT / "release.env.local"
 API = "https://gitee.com/api/v5"
 OWNER = "kz_y"
-REPO = "ruststudy"
+REPO = "naxone"
 
 
 def read_version() -> str:
@@ -122,7 +122,7 @@ def upload_asset(session: requests.Session, release_id: int, file_path: Path) ->
 
 def build_body(version: str, filename: str, sha256: str, file_size: float) -> str:
     return "\n".join([
-        f"## RustStudy v{version}",
+        f"## NaxOne v{version}",
         "",
         f"- Built at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')}",
         f"- File: {filename}",
@@ -141,7 +141,7 @@ def main() -> int:
 
     version = args.version.strip()
     tag = f"v{version}"
-    installer = Path(args.file_path) if args.file_path else ROOT / "target/release/bundle/nsis" / f"RustStudy_{version}_x64-setup.exe"
+    installer = Path(args.file_path) if args.file_path else ROOT / "target/release/bundle/nsis" / f"NaxOne_{version}_x64-setup.exe"
     if not installer.exists():
         raise SystemExit(f"安装包不存在: {installer}")
 
@@ -149,7 +149,7 @@ def main() -> int:
     session = requests.Session()
     session.headers.update({
         "Authorization": f"token {token}",
-        "User-Agent": "RustStudy-Release/1.0",
+        "User-Agent": "NaxOne-Release/1.0",
         "Accept": "application/json",
     })
 
@@ -170,10 +170,10 @@ def main() -> int:
 
     release = find_release(session, tag)
     if release is None:
-        release = create_release(session, tag, f"RustStudy v{version}", body)
+        release = create_release(session, tag, f"NaxOne v{version}", body)
         print(f"created release id={release['id']}")
     else:
-        release = update_release(session, release["id"], f"RustStudy v{version}", body)
+        release = update_release(session, release["id"], f"NaxOne v{version}", body)
         print(f"updated release id={release['id']}")
 
     release_id = release["id"]

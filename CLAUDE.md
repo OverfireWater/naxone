@@ -1,4 +1,4 @@
-# RustStudy 项目规范
+# NaxOne 项目规范
 
 ## 第一性原理
 

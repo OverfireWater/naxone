@@ -2195,6 +2195,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "naxone-adapters"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "naxone-core",
+ "rcgen",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "time",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "winreg 0.52.0",
+ "zip",
+]
+
+[[package]]
+name = "naxone-core"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
+name = "naxone-tauri"
+version = "0.3.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "naxone-adapters",
+ "naxone-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-single-instance",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3312,58 +3364,6 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted",
-]
-
-[[package]]
-name = "ruststudy-adapters"
-version = "0.2.3"
-dependencies = [
- "async-trait",
- "futures-util",
- "rcgen",
- "reqwest 0.12.28",
- "ruststudy-core",
- "serde",
- "serde_json",
- "sha2",
- "time",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "winreg 0.52.0",
- "zip",
-]
-
-[[package]]
-name = "ruststudy-core"
-version = "0.2.3"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "toml 0.8.23",
- "tracing",
-]
-
-[[package]]
-name = "ruststudy-tauri"
-version = "0.2.3"
-dependencies = [
- "chrono",
- "futures-util",
- "reqwest 0.12.28",
- "ruststudy-adapters",
- "ruststudy-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
