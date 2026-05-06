@@ -80,17 +80,6 @@ cargo tauri build
 cargo test --workspace
 ```
 
-### 发布到 Gitee + GitHub（双发布）
-
-```bash
-# 准备 Gitee token（GitHub 走本地 gh CLI，已 auth login 即可）
-cp release.env.local.example release.env.local
-# 填入 GITEE_TOKEN
-
-# 双发布
-python scripts/release_gitee.py --notes-file RELEASE_NOTES_X.Y.Z.md
-```
-
 ## 架构
 
 采用**六边形架构**（Hexagonal / Ports & Adapters），核心业务逻辑跟外部依赖完全解耦：
@@ -149,9 +138,6 @@ naxone/
 │       ├── nsis/installer-hooks.nsh    # Windows 安装器自定义（默认装到 D:\NaxOne）
 │       ├── icons/                      # 应用图标（自动从 logo.png 生成）
 │       └── capabilities/               # Tauri 权限配置
-│
-└── scripts/
-    └── release_gitee.py                # Gitee + GitHub 双发布脚本
 ```
 
 ## 兼容性
