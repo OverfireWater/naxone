@@ -15,6 +15,8 @@
 
 [下载安装包 (Gitee)](https://gitee.com/kz_y/naxone/releases/latest) · [下载安装包 (GitHub)](https://github.com/OverfireWater/naxone/releases/latest) · [问题反馈](https://gitee.com/kz_y/naxone/issues)
 
+**中文** · [English](README_EN.md)
+
 </div>
 
 ---
