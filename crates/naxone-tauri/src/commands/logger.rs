@@ -42,6 +42,37 @@ pub async fn push_log(
     }
 }
 
+/// 一劳永逸的命令日志包装：在 return 前调一行，自动记录成功/失败。
+///
+/// 用法：
+/// ```ignore
+/// let result = do_something().await;
+/// logged(&state, "tool", format!("切换 Node 到 v{}", ver), result).await
+/// ```
+pub async fn logged<T>(
+    state: &AppState,
+    category: &str,
+    action: impl Into<String>,
+    result: Result<T, String>,
+) -> Result<T, String> {
+    let action = action.into();
+    match &result {
+        Ok(_) => push_log(state, LogLevel::Info, category, &action, None, None).await,
+        Err(e) => {
+            push_log(
+                state,
+                LogLevel::Error,
+                category,
+                format!("{} 失败", action),
+                Some(e.clone()),
+                None,
+            )
+            .await
+        }
+    }
+    result
+}
+
 /// Spawn background task to write log entries to daily files
 pub fn spawn_log_writer(state: std::sync::Arc<AppState>) -> tokio::sync::mpsc::UnboundedSender<LogEntry> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LogEntry>();

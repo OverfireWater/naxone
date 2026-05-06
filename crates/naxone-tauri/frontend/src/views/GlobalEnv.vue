@@ -1,0 +1,617 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { AlertTriangle } from "lucide-vue-next";
+import SelectMenu from "../components/SelectMenu.vue";
+import { toast } from "../composables/useToast";
+
+interface ServiceInfo {
+  id: string; kind: string; display_name: string; version: string;
+  variant: string | null; port: number;
+  status: { state: string; pid?: number; memory_mb?: number };
+  install_path: string; origin: string;
+}
+
+interface GlobalPhpInfo {
+  version: string | null;
+  bin_dir: string;
+  path_registered: boolean;
+  conflicts: string[];
+}
+
+interface ComposerOption { version: string; source: string; phar_path: string; }
+interface ComposerToolInfo { active_version: string | null; available: ComposerOption[]; }
+interface NvmToolInfo { nvm_version: string; nvm_source: string; nvm_home: string; current_node: string | null; installed_nodes: string[]; }
+interface MysqlOption { version: string; install_path: string; data_dir: string; bin_dir: string; port: number; initialized: boolean; root_password: string; source: string; }
+interface MysqlToolInfo { active_version: string | null; available: MysqlOption[]; conflicts: string[]; }
+interface DevToolsInfo { composer: ComposerToolInfo | null; nvm: NvmToolInfo | null; mysql: MysqlToolInfo | null; }
+
+const services = ref<ServiceInfo[]>([]);
+const globalPhp = ref<GlobalPhpInfo>({ version: null, bin_dir: "", path_registered: false, conflicts: [] });
+const showConflictHelp = ref(false);
+const conflictFixBusy = ref(false);
+const globalPhpPick = ref("");
+const globalPhpBusy = ref(false);
+
+// 首屏加载完成才显示卡片，避免数据未到时闪现"未发现 X"
+const loaded = ref(false);
+
+const devTools = ref<DevToolsInfo>({ composer: null, nvm: null, mysql: null });
+const nodePick = ref("");
+const composerPick = ref("");
+const mysqlPick = ref("");
+const mysqlPwdInput = ref("");
+const mysqlCurrentPwd = ref("");
+const showMysqlPwd = ref(false);
+const mysqlConflictFixBusy = ref(false);
+const nodeSwitchBusy = ref(false);
+const composerSwitchBusy = ref(false);
+const mysqlSwitchBusy = ref(false);
+const mysqlPwdBusy = ref(false);
+
+let unlistenServicesChanged: UnlistenFn | null = null;
+
+const phpServices = computed(() => services.value.filter(s => s.kind === "php"));
+
+const currentMysqlOption = computed<MysqlOption | undefined>(() =>
+  devTools.value.mysql?.available.find(a => a.version === mysqlPick.value)
+);
+
+function originShort(s: ServiceInfo): string {
+  if (s.origin === "phpstudy") return "PS";
+  if (s.origin === "manual") return "独立";
+  if (s.origin === "system") return "系统";
+  return "NX";
+}
+function phpOptionLabel(p: ServiceInfo): string {
+  return `v${p.version}${p.variant ? ` ${p.variant}` : ""} [${originShort(p)}]`;
+}
+function sourceLabel(s: string): string {
+  return s === "system" ? "系统" : "NX";
+}
+function showError(msg: string) { toast.error(String(msg)); }
+
+async function loadServices() {
+  try { services.value = await invoke("get_services"); }
+  catch (e) { showError(`加载服务失败: ${e}`); }
+}
+
+async function loadGlobalPhp() {
+  try {
+    globalPhp.value = await invoke("get_global_php_version");
+    if (!globalPhpPick.value) {
+      globalPhpPick.value = globalPhp.value.version ?? phpServices.value[0]?.version ?? "";
+    }
+  } catch (e) { showError(`读取全局 PHP 失败: ${e}`); }
+}
+
+async function loadDevTools() {
+  try {
+    devTools.value = await invoke("get_dev_tools_info");
+    if (devTools.value.nvm?.current_node && !nodePick.value) {
+      nodePick.value = devTools.value.nvm.current_node;
+    }
+    if (devTools.value.composer?.active_version && !composerPick.value) {
+      composerPick.value = devTools.value.composer.active_version;
+    }
+    if (devTools.value.mysql && !mysqlPick.value) {
+      mysqlPick.value = devTools.value.mysql.active_version
+        ?? devTools.value.mysql.available[0]?.version
+        ?? "";
+    }
+  } catch (e) { showError(`读取开发工具失败: ${e}`); }
+}
+
+async function applyGlobalPhp() {
+  if (!globalPhpPick.value || globalPhpBusy.value) return;
+  const version = globalPhpPick.value;
+  const firstTime = !globalPhp.value.version;
+  const hint = firstTime
+    ? `将 CLI 的 php 命令切到 v${version}。首次使用会把 ~/.naxone/bin 加入用户 PATH。继续？`
+    : `切换 CLI php 到 v${version}。新开命令行窗口即可生效。继续？`;
+  const ok = await confirm(hint, { title: "设置全局 PHP", kind: "info" });
+  if (!ok) return;
+
+  globalPhpBusy.value = true;
+  try {
+    globalPhp.value = await invoke("set_global_php_version", { version });
+    const tip = firstTime && globalPhp.value.path_registered
+      ? `全局 PHP 已切到 v${version}。请**新开** cmd 窗口跑 \`php -v\` 验证。`
+      : `全局 PHP 已切到 v${version}`;
+    toast.success(tip);
+  } catch (e) { showError(`设置失败: ${e}`); }
+  finally { globalPhpBusy.value = false; }
+}
+
+async function fixConflicts() {
+  if (conflictFixBusy.value || !globalPhp.value.conflicts.length) return;
+  const list = globalPhp.value.conflicts;
+  const ok = await confirm(
+    `即将从系统 PATH 清除 ${list.length} 条 PHP 路径：\n\n${list.join("\n")}\n\n需要管理员权限（会弹 UAC 确认）。`,
+    { title: "一键修复 PATH 冲突", kind: "warning" }
+  );
+  if (!ok) return;
+  conflictFixBusy.value = true;
+  try {
+    globalPhp.value = await invoke("fix_global_php_conflicts", { paths: list });
+    if (globalPhp.value.conflicts.length === 0) {
+      toast.success("清理完成。请**新开** cmd 窗口验证。");
+    } else {
+      toast.warn(`部分路径仍在系统 PATH 中（${globalPhp.value.conflicts.length} 条）`);
+    }
+  } catch (e) { showError(`修复失败: ${e}`); }
+  finally { conflictFixBusy.value = false; }
+}
+
+async function openEnvEditor() {
+  try { await invoke("open_system_env_editor"); }
+  catch (e) { showError(`打开失败: ${e}`); }
+}
+
+async function switchNode() {
+  if (!nodePick.value || nodeSwitchBusy.value) return;
+  nodeSwitchBusy.value = true;
+  try {
+    const result: NvmToolInfo = await invoke("switch_node_version", { version: nodePick.value });
+    devTools.value = { ...devTools.value, nvm: result };
+    toast.success(`Node.js 已切换到 v${result.current_node ?? nodePick.value}`);
+  } catch (e) { showError(`切换失败: ${e}`); }
+  finally { nodeSwitchBusy.value = false; }
+}
+
+async function switchComposer() {
+  if (!composerPick.value || composerSwitchBusy.value) return;
+  composerSwitchBusy.value = true;
+  try {
+    const result: DevToolsInfo = await invoke("set_global_composer", { version: composerPick.value });
+    devTools.value = result;
+    toast.success(`Composer 全局版本已切到 v${composerPick.value}`);
+  } catch (e) { showError(`切换失败: ${e}`); }
+  finally { composerSwitchBusy.value = false; }
+}
+
+async function switchMysql() {
+  if (!mysqlPick.value || mysqlSwitchBusy.value) return;
+  mysqlSwitchBusy.value = true;
+  try {
+    const result: DevToolsInfo = await invoke("set_global_mysql", { version: mysqlPick.value });
+    devTools.value = result;
+    toast.success(`MySQL 全局版本已切到 v${mysqlPick.value}`);
+  } catch (e) { showError(`切换失败: ${e}`); }
+  finally { mysqlSwitchBusy.value = false; }
+}
+
+async function saveMysqlPassword() {
+  const ver = mysqlPick.value;
+  const pwd = mysqlPwdInput.value;
+  if (!ver) { showError("请先选择 MySQL 版本"); return; }
+  if (!pwd) { showError("新密码不能为空"); return; }
+
+  // 当前密码：UI 上的输入优先；否则用 stored root_password；都空则后端会用空串试一次
+  const opt = currentMysqlOption.value;
+  const current = mysqlCurrentPwd.value || opt?.root_password || "";
+
+  mysqlPwdBusy.value = true;
+  try {
+    const result: DevToolsInfo = await invoke("set_mysql_password", {
+      version: ver,
+      newPassword: pwd,
+      currentPassword: current || null,
+    });
+    devTools.value = result;
+    mysqlPwdInput.value = "";
+    mysqlCurrentPwd.value = "";
+    toast.success(`MySQL v${ver} root 密码已更新`);
+  } catch (e) { showError(`修改密码失败: ${e}`); }
+  finally { mysqlPwdBusy.value = false; }
+}
+
+async function fixMysqlPathConflicts() {
+  const list = devTools.value.mysql?.conflicts ?? [];
+  if (!list.length || mysqlConflictFixBusy.value) return;
+  const ok = await confirm(
+    `即将从系统 PATH 清除 ${list.length} 条 MySQL 目录：\n\n${list.join("\n")}\n\n需要管理员权限（会弹 UAC 确认）。`,
+    { title: "一键修复 MySQL PATH 冲突", kind: "warning" }
+  );
+  if (!ok) return;
+  mysqlConflictFixBusy.value = true;
+  try {
+    const result: DevToolsInfo = await invoke("fix_mysql_path_conflicts", { paths: list });
+    devTools.value = result;
+    const remaining = result.mysql?.conflicts.length ?? 0;
+    if (remaining === 0) {
+      toast.success("已清理。请**新开** cmd 跑 `where mysql` 验证。");
+    } else {
+      toast.warn(`部分路径仍在系统 PATH（剩 ${remaining} 条）`);
+    }
+  } catch (e) { showError(`修复失败: ${e}`); }
+  finally { mysqlConflictFixBusy.value = false; }
+}
+
+function mysqlSourceLabel(s: string): string {
+  switch (s) {
+    case "store": return "NX";
+    case "phpstudy": return "PS";
+    case "manual": return "独立";
+    case "system": return "系统";
+    default: return s;
+  }
+}
+
+onMounted(async () => {
+  // 三个请求并发拉，全部回来再放下 loading 屏，避免逐个填充导致的"未发现 X"误导
+  await Promise.all([loadServices(), loadGlobalPhp(), loadDevTools()]);
+  loaded.value = true;
+  unlistenServicesChanged = await listen("services-changed", () => {
+    loadServices();
+    loadGlobalPhp();
+    loadDevTools();
+  });
+});
+
+onUnmounted(() => {
+  if (unlistenServicesChanged) unlistenServicesChanged();
+});
+</script>
+
+<template>
+  <div>
+    <p class="page-subtitle">配置命令行 <code>php</code> / <code>composer</code> / <code>node</code> / <code>mysql</code> 走哪个版本，以及 MySQL root 密码。</p>
+
+    <!-- 首屏加载占位：4 张卡的骨架，避免空状态闪烁 -->
+    <template v-if="!loaded">
+      <div v-for="i in 4" :key="i" class="card mb-3 env-skeleton">
+        <div class="skel-bar skel-title"></div>
+        <div class="skel-bar skel-line"></div>
+        <div class="skel-bar skel-line w-2/3"></div>
+      </div>
+    </template>
+
+    <template v-else>
+    <!-- PHP -->
+    <div class="card mb-3">
+      <h2 class="env-section-title">PHP（命令行 <code>php</code>）</h2>
+      <div v-if="phpServices.length === 0" class="env-empty">未发现 PHP 安装。可在「软件商店」安装。</div>
+      <template v-else>
+        <div class="env-row">
+          <span class="env-label">当前全局</span>
+          <span v-if="globalPhp.version" class="env-value">v{{ globalPhp.version }}</span>
+          <span v-else class="env-value env-warn">未设置</span>
+        </div>
+        <div class="env-row">
+          <span class="env-label">切换到</span>
+          <SelectMenu
+            v-model="globalPhpPick"
+            :options="phpServices.map(p => ({ label: phpOptionLabel(p), value: p.version }))"
+            trigger-class="version-sel version-sel-btn"
+          />
+          <button class="btn btn-primary btn-sm ml-auto"
+                  :disabled="!globalPhpPick || globalPhpBusy || globalPhpPick === globalPhp.version"
+                  @click="applyGlobalPhp">
+            {{ globalPhpBusy ? '切换中...' : (globalPhpPick === globalPhp.version ? '已是全局' : '设为全局') }}
+          </button>
+        </div>
+
+        <div v-if="globalPhp.conflicts.length > 0" class="conflict-banner mt-3">
+          <div class="flex items-start gap-2">
+            <AlertTriangle :size="16" class="shrink-0 mt-0.5" style="color: var(--color-warn, #f59e0b)" />
+            <div class="flex-1 text-[12px]">
+              <div class="font-semibold mb-1">全局切换可能不生效</div>
+              <div class="mb-1" style="color: var(--text-secondary)">
+                系统 PATH 里有 {{ globalPhp.conflicts.length }} 条 PHP 目录排在本应用前面，<code>php -v</code> 会优先命中它们。
+              </div>
+              <div class="font-mono text-[11px] mb-2 pl-2" style="color: var(--text-muted)">
+                <div v-for="c in globalPhp.conflicts" :key="c">· {{ c }}</div>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <button class="btn btn-primary btn-sm"
+                        :disabled="conflictFixBusy"
+                        @click="fixConflicts">
+                  {{ conflictFixBusy ? '修复中...' : '一键修复（需管理员）' }}
+                </button>
+                <button class="btn btn-secondary btn-sm" @click="openEnvEditor">打开环境变量窗口</button>
+                <button class="text-[11px] underline cursor-pointer"
+                        style="color: var(--color-blue-light); background: transparent; border: none"
+                        @click="showConflictHelp = !showConflictHelp">
+                  {{ showConflictHelp ? '隐藏手动步骤' : '手动步骤？' }}
+                </button>
+              </div>
+              <div v-if="showConflictHelp" class="mt-2 text-[11px] leading-relaxed"
+                   style="color: var(--text-secondary)">
+                <ol class="list-decimal pl-4 space-y-0.5">
+                  <li>点上面"打开环境变量窗口"按钮</li>
+                  <li>在<b>系统变量</b>区双击 <code>Path</code></li>
+                  <li>删掉上述列出的那几条，一路确定</li>
+                  <li><b>新开</b>命令行窗口，运行 <code>where php</code> 验证</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Composer -->
+    <div class="card mb-3">
+      <h2 class="env-section-title">Composer</h2>
+      <div v-if="!devTools.composer" class="env-empty">未发现 Composer。可在「软件商店」安装。</div>
+      <template v-else>
+        <div class="env-row">
+          <span class="env-label">当前全局</span>
+          <span v-if="devTools.composer.active_version" class="env-value">v{{ devTools.composer.active_version }}</span>
+          <span v-else class="env-value env-warn">未激活</span>
+        </div>
+        <div class="env-row">
+          <template v-if="devTools.composer.available.length > 1">
+            <span class="env-label">切换到</span>
+            <SelectMenu
+              v-model="composerPick"
+              :options="devTools.composer.available.map(a => ({ label: `v${a.version} [${sourceLabel(a.source)}]`, value: a.version }))"
+              trigger-class="version-sel version-sel-btn"
+            />
+            <button class="btn btn-primary btn-sm ml-auto"
+                    :disabled="!composerPick || composerSwitchBusy || composerPick === devTools.composer.active_version"
+                    @click="switchComposer">
+              {{ composerSwitchBusy ? '切换中...' : (composerPick === devTools.composer.active_version ? '当前' : '设为全局') }}
+            </button>
+          </template>
+          <template v-else>
+            <span class="env-label">来源</span>
+            <span class="env-value">
+              {{ devTools.composer.available[0]?.source === 'system' ? '系统' : '商店' }}
+            </span>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- Node.js -->
+    <div class="card mb-3">
+      <h2 class="env-section-title">
+        Node.js
+        <span v-if="devTools.nvm" class="env-section-sub">via NVM v{{ devTools.nvm.nvm_version }} · {{ devTools.nvm.nvm_source === 'system' ? '系统' : '商店' }}</span>
+      </h2>
+      <div v-if="!devTools.nvm" class="env-empty">未发现 NVM。可在「软件商店」安装 nvm-windows。</div>
+      <template v-else>
+        <div class="env-row">
+          <span class="env-label">当前 Node</span>
+          <span v-if="devTools.nvm.current_node" class="env-value">v{{ devTools.nvm.current_node }}</span>
+          <span v-else class="env-value env-warn">未启用</span>
+        </div>
+        <div class="env-row">
+          <template v-if="devTools.nvm.installed_nodes.length > 0">
+            <span class="env-label">切换到</span>
+            <SelectMenu
+              v-model="nodePick"
+              :options="devTools.nvm.installed_nodes.map(v => ({
+                label: `v${v}${v === devTools.nvm!.current_node ? ' ●' : ''}`,
+                value: v
+              }))"
+              trigger-class="version-sel version-sel-btn"
+            />
+            <button class="btn btn-primary btn-sm ml-auto"
+                    :disabled="!nodePick || nodeSwitchBusy || nodePick === devTools.nvm.current_node"
+                    @click="switchNode">
+              {{ nodeSwitchBusy ? '切换中...' : (nodePick === devTools.nvm.current_node ? '当前' : '切换') }}
+            </button>
+          </template>
+          <template v-else>
+            <span class="env-empty">未安装 Node 版本（用 <code>nvm install &lt;version&gt;</code> 装一个）</span>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- MySQL -->
+    <div class="card mb-3">
+      <h2 class="env-section-title">MySQL</h2>
+      <div v-if="!devTools.mysql || devTools.mysql.available.length === 0" class="env-empty">未发现 MySQL 安装。可在「软件商店」安装。</div>
+      <template v-else>
+        <div class="env-row">
+          <span class="env-label">当前全局</span>
+          <span v-if="devTools.mysql.active_version" class="env-value">v{{ devTools.mysql.active_version }}</span>
+          <span v-else class="env-value env-warn">未设全局</span>
+          <span v-if="currentMysqlOption" class="env-port">:{{ currentMysqlOption.port }}</span>
+          <span v-if="currentMysqlOption" class="env-source-badge">{{ mysqlSourceLabel(currentMysqlOption.source) }}</span>
+        </div>
+        <div class="env-row">
+          <span class="env-label">切换到</span>
+          <SelectMenu
+            v-model="mysqlPick"
+            :options="devTools.mysql.available.map(a => ({
+              label: `v${a.version} [${mysqlSourceLabel(a.source)}]${a.version === devTools.mysql!.active_version ? ' ●' : ''}`,
+              value: a.version
+            }))"
+            trigger-class="version-sel version-sel-btn"
+          />
+          <button class="btn btn-primary btn-sm ml-auto"
+                  :disabled="!mysqlPick || mysqlSwitchBusy || mysqlPick === devTools.mysql.active_version"
+                  @click="switchMysql">
+            {{ mysqlSwitchBusy ? '切换中...' : (mysqlPick === devTools.mysql.active_version ? '当前' : '设为全局') }}
+          </button>
+        </div>
+
+        <!-- 系统 PATH 冲突横条：HKLM 里有别的 mysqld 目录会屏蔽用户 PATH 切换 -->
+        <div v-if="devTools.mysql.conflicts.length > 0" class="conflict-banner mt-3">
+          <div class="flex items-start gap-2">
+            <AlertTriangle :size="16" class="shrink-0 mt-0.5" style="color: var(--color-warn)" />
+            <div class="flex-1 text-[12px]">
+              <div class="font-semibold mb-1">"设为全局"可能不生效</div>
+              <div class="mb-1" style="color: var(--text-secondary)">
+                系统 PATH 里有 {{ devTools.mysql.conflicts.length }} 条 MySQL 目录排在用户 PATH 前面，<code>mysql --version</code> 会优先命中它们。
+              </div>
+              <div class="font-mono text-[11px] mb-2 pl-2" style="color: var(--text-muted)">
+                <div v-for="c in devTools.mysql.conflicts" :key="c">· {{ c }}</div>
+              </div>
+              <button class="btn btn-primary btn-sm"
+                      :disabled="mysqlConflictFixBusy"
+                      @click="fixMysqlPathConflicts">
+                {{ mysqlConflictFixBusy ? '修复中...' : '一键修复（需管理员）' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentMysqlOption" class="env-row">
+          <span class="env-label">root 密码</span>
+          <input
+            :type="showMysqlPwd ? 'text' : 'password'"
+            v-model="mysqlPwdInput"
+            :placeholder="currentMysqlOption.root_password ? `当前：${currentMysqlOption.root_password}（输入新密码）` : '输入新密码'"
+            class="env-pwd-input"
+          />
+          <button class="btn btn-secondary btn-sm" type="button"
+                  :title="showMysqlPwd ? '隐藏' : '显示'"
+                  @click="showMysqlPwd = !showMysqlPwd">
+            {{ showMysqlPwd ? '隐藏' : '显示' }}
+          </button>
+          <button class="btn btn-primary btn-sm"
+                  :disabled="!mysqlPwdInput || mysqlPwdBusy"
+                  @click="saveMysqlPassword">
+            {{ mysqlPwdBusy ? '修改中...' : '修改' }}
+          </button>
+        </div>
+        <!-- 当前密码字段：仅在没存过 .naxone-root.txt 时显示（PHPStudy 等外来 MySQL） -->
+        <div v-if="currentMysqlOption && !currentMysqlOption.root_password" class="env-row">
+          <span class="env-label">当前密码</span>
+          <input
+            type="password"
+            v-model="mysqlCurrentPwd"
+            placeholder="留空则尝试空密码（PHPStudy 默认是 root）"
+            class="env-pwd-input"
+          />
+        </div>
+      </template>
+    </div>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.env-skeleton {
+  pointer-events: none;
+}
+.skel-bar {
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  height: 10px;
+  margin-bottom: 6px;
+  animation: skel-pulse 1.2s ease-in-out infinite;
+}
+.skel-title {
+  height: 14px;
+  width: 40%;
+  margin-bottom: 12px;
+}
+.skel-line {
+  width: 100%;
+}
+@keyframes skel-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.95; }
+}
+
+.page-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.env-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.env-section-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.env-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.env-row + .env-row {
+  border-top: 1px solid var(--border-color);
+}
+.env-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 72px;
+  flex-shrink: 0;
+}
+.env-value {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--color-success-light);
+}
+.env-port {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--text-muted);
+}
+.env-source-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.env-warn {
+  color: var(--color-warn, #f59e0b);
+}
+.env-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.env-pwd-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+.env-pwd-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+.conflict-banner {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+:deep(.rs-select.version-sel) {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+}
+:deep(.rs-select-trigger.version-sel-btn) {
+  width: auto;
+  min-width: 140px;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+</style>

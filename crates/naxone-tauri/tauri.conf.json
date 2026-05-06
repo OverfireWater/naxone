@@ -1,13 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
   "productName": "NaxOne",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.naxone.app",
   "build": {
     "frontendDist": "./frontend/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm --prefix naxone-tauri/frontend run dev",
-    "beforeBuildCommand": "npm --prefix naxone-tauri/frontend run build"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [

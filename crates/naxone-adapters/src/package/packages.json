@@ -189,6 +189,26 @@
       ]
     },
     {
+      "name": "composer",
+      "display_name": "Composer",
+      "category": "tool",
+      "brand_color": "#885630",
+      "brand_letter": "C",
+      "homepage": "https://getcomposer.org/",
+      "description": "PHP 包管理器，装上后自动配阿里云镜像源",
+      "versions": []
+    },
+    {
+      "name": "nvm",
+      "display_name": "NVM",
+      "category": "tool",
+      "brand_color": "#5fa04e",
+      "brand_letter": "N",
+      "homepage": "https://github.com/coreybutler/nvm-windows",
+      "description": "Node.js 多版本管理（nvm-windows），自动配 npmmirror 国内源",
+      "versions": []
+    },
+    {
       "name": "redis",
       "display_name": "Redis",
       "category": "cache",

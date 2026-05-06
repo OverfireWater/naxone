@@ -70,29 +70,7 @@ pub fn read_active_php_dir() -> Option<PathBuf> {
 /// 不存在就追加，返回 true；已存在返回 false。
 /// 追加后广播 WM_SETTINGCHANGE，让新 shell 立即感知。
 pub fn ensure_path_in_user_env() -> std::io::Result<bool> {
-    let bin = bin_dir();
-    let bin_str = bin.display().to_string();
-
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let env_key = hkcu.open_subkey_with_flags("Environment", KEY_READ | KEY_SET_VALUE)?;
-
-    let current: String = env_key.get_value("Path").unwrap_or_default();
-    if path_contains(&current, &bin_str) {
-        return Ok(false);
-    }
-
-    let new_path = if current.trim_end_matches(';').is_empty() {
-        bin_str.clone()
-    } else {
-        format!("{};{}", current.trim_end_matches(';'), bin_str)
-    };
-    env_key.set_value("Path", &new_path)?;
-
-    broadcast_env_change();
-    Ok(true)
+    super::user_env::append_to_user_path(&bin_dir().display().to_string())
 }
 
 /// 查询 bin_dir 是否已经注册到用户 PATH
@@ -106,7 +84,7 @@ pub fn is_path_registered() -> bool {
         .ok()
         .and_then(|k| k.get_value::<String, _>("Path").ok())
         .unwrap_or_default();
-    path_contains(&current, &bin)
+    super::user_env::path_contains(&current, &bin)
 }
 
 /// 检测系统 PATH (HKLM) 里会屏蔽我们 shim 的 PHP 目录。
@@ -129,7 +107,7 @@ pub fn detect_masking_paths() -> Vec<PathBuf> {
         Err(_) => return Vec::new(),
     };
     let system_path: String = env_key.get_value("Path").unwrap_or_default();
-    let our_bin_norm = normalize_path(&bin_dir().display().to_string());
+    let our_bin_norm = super::user_env::normalize_path(&bin_dir().display().to_string());
 
     let mut out = Vec::new();
     for entry in system_path.split(';') {
@@ -139,7 +117,7 @@ pub fn detect_masking_paths() -> Vec<PathBuf> {
         }
         // 展开 %SystemRoot% 等常见环境变量引用
         let expanded = expand_env_vars(trimmed);
-        let norm = normalize_path(&expanded);
+        let norm = super::user_env::normalize_path(&expanded);
         if norm == our_bin_norm {
             continue;
         }
@@ -275,74 +253,10 @@ fn expand_env_vars(s: &str) -> String {
     result
 }
 
-fn normalize_path(s: &str) -> String {
-    s.trim()
-        .trim_end_matches('\\')
-        .replace('/', "\\")
-        .to_ascii_lowercase()
-}
-
-/// 用户 PATH 里是否已包含 target（不区分大小写 + 去空格 + 去结尾反斜杠）
-fn path_contains(haystack: &str, target: &str) -> bool {
-    let normalize = |s: &str| {
-        s.trim()
-            .trim_end_matches('\\')
-            .replace('/', "\\")
-            .to_ascii_lowercase()
-    };
-    let t = normalize(target);
-    haystack.split(';').any(|p| normalize(p) == t)
-}
-
-/// 发送 WM_SETTINGCHANGE 广播，通知所有顶层窗口"环境变量变了"。
-/// 新开的 cmd / explorer 会重新读 PATH。
-fn broadcast_env_change() {
-    // 用最小化的 windows API 调用；避免拉 windows-sys 依赖的话可以直接 FFI
-    #[link(name = "user32")]
-    unsafe extern "system" {
-        fn SendMessageTimeoutW(
-            hwnd: isize,
-            msg: u32,
-            wparam: usize,
-            lparam: *const u16,
-            flags: u32,
-            timeout: u32,
-            result: *mut usize,
-        ) -> isize;
-    }
-    const HWND_BROADCAST: isize = 0xffff;
-    const WM_SETTINGCHANGE: u32 = 0x001A;
-    const SMTO_ABORTIFHUNG: u32 = 0x0002;
-
-    // "Environment" as UTF-16
-    let msg: Vec<u16> = "Environment\0".encode_utf16().collect();
-    let mut result: usize = 0;
-    unsafe {
-        SendMessageTimeoutW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0,
-            msg.as_ptr(),
-            SMTO_ABORTIFHUNG,
-            3000,
-            &mut result,
-        );
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn path_contains_handles_variants() {
-        assert!(path_contains(r"C:\a;C:\Users\x\.naxone\bin;C:\b", r"C:\Users\x\.naxone\bin"));
-        assert!(path_contains(r"C:\Users\x\.naxone\bin\", r"C:\Users\x\.naxone\bin"));
-        assert!(path_contains(r"C:\USERS\X\.NAXONE\BIN", r"c:\users\x\.naxone\bin"));
-        assert!(path_contains(r"C:\Users\x/.naxone/bin", r"C:\Users\x\.naxone\bin"));
-        assert!(!path_contains(r"C:\a;C:\b", r"C:\Users\x\.naxone\bin"));
-        assert!(!path_contains("", r"C:\Users\x\.naxone\bin"));
-    }
 
     #[test]
     fn expand_env_vars_replaces_known() {

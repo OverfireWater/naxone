@@ -25,7 +25,12 @@ interface PackageEntry {
   versions: PackageVersion[];
 }
 
-interface InstalledPackage { name: string; version: string; install_path: string; }
+interface InstalledPackage {
+  name: string;
+  version: string;
+  install_path: string;
+  source: string; // "store" = NaxOne 装的；"system" = 用户系统已有
+}
 
 const packages = ref<PackageEntry[]>([]);
 const installed = ref<InstalledPackage[]>([]);
@@ -38,6 +43,7 @@ const categories = [
   { key: "db", label: "数据库" },
   { key: "php", label: "PHP" },
   { key: "cache", label: "缓存" },
+  { key: "tool", label: "开发工具" },
 ];
 
 async function loadPackages() {
@@ -62,8 +68,8 @@ async function loadInstalled() {
   catch (e) { toast.error("获取已装列表失败: " + e); }
 }
 
-function installedVersionsOf(name: string): string[] {
-  return installed.value.filter(i => i.name === name).map(i => i.version);
+function installedVersionsOf(name: string): InstalledPackage[] {
+  return installed.value.filter(i => i.name === name);
 }
 
 const visiblePackages = computed(() => {
@@ -77,14 +83,18 @@ const categoryCount = (cat: string) => {
   return packages.value.filter(p => p.category === cat).length;
 };
 
-function onInstalled() {
-  // An install finished — refresh installed list so card state updates.
-  loadInstalled();
+function displayNameOf(name: string): string {
+  return packages.value.find(p => p.name === name)?.display_name ?? name;
 }
 
-function onUninstalled() {
-  // An uninstall finished — refresh so "已安装" badge goes away.
+function onInstalled(payload: { name: string; version: string }) {
   loadInstalled();
+  toast.success(`${displayNameOf(payload.name)} v${payload.version} 已安装`);
+}
+
+function onUninstalled(payload: { name: string; version: string }) {
+  loadInstalled();
+  toast.success(`${displayNameOf(payload.name)} v${payload.version} 已卸载`);
 }
 
 onMounted(() => {

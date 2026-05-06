@@ -861,8 +861,11 @@ async fn pid_matches_instance(pid: u32, instance: &ServiceInstance) -> bool {
     if !pid_matches_service(pid, instance.kind).await {
         return false;
     }
+    // 取不到 exe 路径（典型：PHPStudy 等管理员进程，普通权限拒绝访问）→ 保守判定为
+    // **不属于本实例**。否则同 kind 多版本（如 store v5/v8 + PHPStudy v5）都会被
+    // 端口判定为 Running，进而把卸载/启动等逻辑全带歪。
     let Some(exe_path) = get_process_exe_path(pid).await else {
-        return true;
+        return false;
     };
     let exe = exe_path.replace('/', "\\").to_lowercase();
     let install = instance
@@ -871,7 +874,7 @@ async fn pid_matches_instance(pid: u32, instance: &ServiceInstance) -> bool {
         .replace('/', "\\")
         .to_lowercase();
     if install.is_empty() {
-        return true;
+        return false;
     }
     let prefix = if install.ends_with('\\') {
         install.clone()

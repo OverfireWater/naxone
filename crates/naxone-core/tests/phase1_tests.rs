@@ -168,6 +168,7 @@ fn app_config_toml_roundtrip_with_extras() {
             ],
             package_install_root: None,
             global_php_version: None,
+            stop_services_on_exit: false,
         },
         web_server: Default::default(),
         mysql: Default::default(),

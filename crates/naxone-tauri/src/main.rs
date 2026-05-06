@@ -97,6 +97,15 @@ fn main() {
             commands::package::get_installed_packages,
             commands::package::install_package,
             commands::package::uninstall_package,
+            commands::package::unlink_system_tool,
+            commands::package::deep_uninstall_system_tool,
+            commands::package::preview_system_tool_uninstall,
+            commands::tools::get_dev_tools_info,
+            commands::tools::switch_node_version,
+            commands::tools::set_global_composer,
+            commands::tools::set_global_mysql,
+            commands::tools::set_mysql_password,
+            commands::tools::fix_mysql_path_conflicts,
         ])
         .setup(|app| {
             // Dev 模式窗口标题加标识

@@ -6,6 +6,7 @@ pub mod service;
 pub mod service_config;
 pub mod strangers;
 pub mod settings;
+pub mod tools;
 pub mod updater;
 pub mod utils;
 pub mod vhost;

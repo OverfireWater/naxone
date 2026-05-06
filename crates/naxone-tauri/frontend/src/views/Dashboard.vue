@@ -93,16 +93,11 @@ function fmtUptime(s: number): string {
   return `${d}d ${h}h`;
 }
 
-// 全局 CLI PHP
+// 全局 CLI PHP（只读摘要，编辑在 /env 页）
 interface GlobalPhpInfo { version: string | null; bin_dir: string; path_registered: boolean; conflicts: string[]; }
 const globalPhp = ref<GlobalPhpInfo>({ version: null, bin_dir: "", path_registered: false, conflicts: [] });
-const showConflictHelp = ref(false);
-const conflictFixBusy = ref(false);
-const globalPhpPick = ref<string>(""); // 下拉当前选的版本
-const globalPhpBusy = ref(false);
 
 import { toast } from "../composables/useToast";
-import { confirm } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 const busyIds = ref<Set<string>>(new Set());
 const recentLogs = ref<LogEntry[]>([]);
@@ -161,15 +156,11 @@ function originShort(s: ServiceInfo): string {
   if (s.origin === "phpstudy") return "PS";
   if (s.origin === "manual") return "独立";
   if (s.origin === "system") return "系统";
-  return "RS";
+  return "NX";
 }
 
 function versionOptionLabel(s: ServiceInfo, running: ServiceInfo | null): string {
   return `${running?.id === s.id ? "● " : ""}v${s.version} [${originShort(s)}]`;
-}
-
-function phpOptionLabel(p: ServiceInfo): string {
-  return `v${p.version}${p.variant ? ` ${p.variant}` : ""} [${originShort(p)}]`;
 }
 
 /** 在不同版本运行时，从下拉选了另一个版本 + 点"切换" → 停旧启新 */
@@ -207,7 +198,7 @@ function isBusy(id: string): boolean { return busyIds.value.has(id); }
 function originBadge(s: ServiceInfo): { text: string; color: string } | null {
   if (s.origin === "phpstudy") return { text: "PS", color: "#8b5cf6" };
   if (s.origin === "manual") return { text: "独立", color: "#06b6d4" };
-  if (s.origin === "store") return { text: "RS", color: "#22c55e" };
+  if (s.origin === "store") return { text: "NX", color: "#22c55e" };
   if (s.origin === "system") return { text: "系统", color: "#f59e0b" };
   return null;
 }
@@ -235,6 +226,7 @@ async function manualRefresh() {
       loadServices(true),
       loadAppStats(),
       loadGlobalPhp(),
+      loadDevTools(),
       loadRecentLogs(),
       scanStrangers(),
     ]);
@@ -311,9 +303,6 @@ async function checkStartupErrors() {
 async function loadGlobalPhp() {
   try {
     globalPhp.value = await invokeWithTimeout<GlobalPhpInfo>("get_global_php_version");
-    if (!globalPhpPick.value) {
-      globalPhpPick.value = globalPhp.value.version ?? phpServices.value[0]?.version ?? "";
-    }
   } catch (e) {
     const now = Date.now();
     const last = bgErrorAt.get("global_php") ?? 0;
@@ -324,58 +313,27 @@ async function loadGlobalPhp() {
   }
 }
 
-async function fixConflicts() {
-  if (conflictFixBusy.value || !globalPhp.value.conflicts.length) return;
-  const list = globalPhp.value.conflicts;
-  const ok = await confirm(
-    `即将从系统 PATH 清除 ${list.length} 条 PHP 路径：\n\n${list.join('\n')}\n\n需要管理员权限（会弹 UAC 确认）。`,
-    { title: "一键修复 PATH 冲突", kind: "warning" }
-  );
-  if (!ok) return;
-  conflictFixBusy.value = true;
+// ==================== Dev Tools ====================
+
+interface ComposerOption { version: string; source: string; phar_path: string; }
+interface ComposerToolInfo { active_version: string | null; available: ComposerOption[]; }
+interface NvmToolInfo { nvm_version: string; nvm_source: string; nvm_home: string; current_node: string | null; installed_nodes: string[]; }
+interface MysqlOption { version: string; install_path: string; data_dir: string; bin_dir: string; port: number; initialized: boolean; root_password: string; }
+interface MysqlToolInfo { active_version: string | null; available: MysqlOption[]; }
+interface DevToolsInfo { composer: ComposerToolInfo | null; nvm: NvmToolInfo | null; mysql: MysqlToolInfo | null; }
+
+const devTools = ref<DevToolsInfo>({ composer: null, nvm: null, mysql: null });
+
+async function loadDevTools() {
   try {
-    globalPhp.value = await invokeWithTimeout<GlobalPhpInfo>("fix_global_php_conflicts", { paths: list });
-    if (globalPhp.value.conflicts.length === 0) {
-      toast.success("清理完成。请**新开** cmd 窗口验证。");
-    } else {
-      toast.warn(`部分路径仍在系统 PATH 中（${globalPhp.value.conflicts.length} 条）`);
+    devTools.value = await invokeWithTimeout<DevToolsInfo>("get_dev_tools_info");
+  } catch (e) {
+    const now = Date.now();
+    const last = bgErrorAt.get("dev_tools") ?? 0;
+    if (now - last > 15000) {
+      bgErrorAt.set("dev_tools", now);
+      toast.warn(`读取开发工具信息失败: ${e}`);
     }
-  } catch (e) {
-    showError(`修复失败: ${e}`);
-  } finally {
-    conflictFixBusy.value = false;
-  }
-}
-
-async function openEnvEditor() {
-  try {
-    await invokeWithTimeout("open_system_env_editor");
-  } catch (e) {
-    showError(`打开失败: ${e}`);
-  }
-}
-
-async function applyGlobalPhp() {
-  if (!globalPhpPick.value || globalPhpBusy.value) return;
-  const version = globalPhpPick.value;
-  const firstTime = !globalPhp.value.version;
-  const hint = firstTime
-    ? `将 CLI 的 php 命令切到 v${version}。首次使用会把 ~/.naxone/bin 加入用户 PATH。继续？`
-    : `切换 CLI php 到 v${version}。新开命令行窗口即可生效。继续？`;
-  const ok = await confirm(hint, { title: "设置全局 PHP", kind: "info" });
-  if (!ok) return;
-
-  globalPhpBusy.value = true;
-  try {
-    globalPhp.value = await invokeWithTimeout<GlobalPhpInfo>("set_global_php_version", { version });
-    const tip = firstTime && globalPhp.value.path_registered
-      ? `全局 PHP 已切到 v${version}。请**新开** cmd 窗口跑 \`php -v\` 验证。`
-      : `全局 PHP 已切到 v${version}`;
-    toast.success(tip);
-  } catch (e) {
-    showError(`设置失败: ${e}`);
-  } finally {
-    globalPhpBusy.value = false;
   }
 }
 
@@ -445,6 +403,7 @@ onMounted(async () => {
   checkStartupErrors();
   loadRecentLogs();
   loadGlobalPhp();
+  loadDevTools();
   loadAppStats();
   checkForUpdates();
   // 异步扫描占用关键端口的外部进程（不阻塞首屏）
@@ -453,6 +412,7 @@ onMounted(async () => {
   unlistenServicesChanged = await listen("services-changed", () => {
     loadServices(true);
     loadGlobalPhp();
+    loadDevTools();
   });
   // 轮询从 3s 放宽到 5s（后端已做 status 缓存 + 快速返回 + 后台并行刷新）
   svcTimer = window.setInterval(() => {
@@ -486,7 +446,7 @@ onUnmounted(() => {
 
     <!-- 外部进程提醒：占着关键端口但不在我们管理的安装目录里的进程 -->
     <div v-for="s in strangers" :key="s.pid" class="stranger-banner mb-2">
-      <AlertTriangle :size="16" class="shrink-0" style="color: #f59e0b" />
+      <AlertTriangle :size="16" class="shrink-0" style="color: var(--color-warn)" />
       <span class="text-[13px] flex-1 min-w-0 truncate">
         检测到外部 <b>{{ s.kind }}</b> 占用端口 <b>{{ s.port }}</b>
         <span class="font-mono text-[11px] ml-1 opacity-70">{{ s.exe_path }} (PID {{ s.pid }})</span>
@@ -616,67 +576,6 @@ onUnmounted(() => {
           </span>
         </div>
 
-        <!-- 全局 CLI PHP：用户命令行 `php -v` 对应的版本 -->
-        <div class="flex items-center gap-2 mb-3 pb-3"
-             style="border-bottom: 1px solid var(--border-color)">
-          <span class="text-[12px] shrink-0" style="color: var(--text-muted)">全局 CLI:</span>
-          <SelectMenu
-            v-if="phpServices.length > 0"
-            v-model="globalPhpPick"
-            :options="phpServices.map((p) => ({ label: phpOptionLabel(p), value: p.version }))"
-            trigger-class="version-sel version-sel-btn"
-          />
-          <span v-if="globalPhp.version" class="text-[11px]" style="color: var(--text-muted)">
-            当前: v{{ globalPhp.version }}
-          </span>
-          <span v-else class="text-[11px]" style="color: var(--color-warn, #f59e0b)">未设置</span>
-          <button class="btn btn-primary btn-sm ml-auto"
-                  :disabled="!globalPhpPick || globalPhpBusy || globalPhpPick === globalPhp.version"
-                  @click="applyGlobalPhp">
-            {{ globalPhpBusy ? '切换中...' : (globalPhpPick === globalPhp.version ? '已是全局' : '设为全局') }}
-          </button>
-        </div>
-
-        <!-- 系统 PATH 冲突警告：系统 PATH 排在用户 PATH 前面，老的 PHP 路径会屏蔽我们的 shim -->
-        <div v-if="globalPhp.conflicts.length > 0" class="conflict-banner mb-3">
-          <div class="flex items-start gap-2">
-            <AlertTriangle :size="16" class="shrink-0 mt-0.5" style="color: #f59e0b" />
-            <div class="flex-1 text-[12px]">
-              <div class="font-semibold mb-1">全局切换可能不生效</div>
-              <div class="mb-1" style="color: var(--text-secondary)">
-                系统 PATH 里有 {{ globalPhp.conflicts.length }} 条 PHP 目录排在本应用前面，`php -v` 会优先命中它们。
-              </div>
-              <div class="font-mono text-[11px] mb-2 pl-2" style="color: var(--text-muted)">
-                <div v-for="c in globalPhp.conflicts" :key="c">· {{ c }}</div>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <button class="btn btn-primary btn-sm"
-                        :disabled="conflictFixBusy"
-                        @click="fixConflicts">
-                  {{ conflictFixBusy ? '修复中...' : '一键修复（需管理员）' }}
-                </button>
-                <button class="btn btn-secondary btn-sm" @click="openEnvEditor">
-                  打开环境变量窗口
-                </button>
-                <button class="text-[11px] underline cursor-pointer"
-                        style="color: var(--color-blue-light); background: transparent; border: none"
-                        @click="showConflictHelp = !showConflictHelp">
-                  {{ showConflictHelp ? '隐藏手动步骤' : '手动步骤？' }}
-                </button>
-              </div>
-              <div v-if="showConflictHelp" class="mt-2 text-[11px] leading-relaxed"
-                   style="color: var(--text-secondary)">
-                <ol class="list-decimal pl-4 space-y-0.5">
-                  <li>点上面"打开环境变量窗口"按钮</li>
-                  <li>在**系统变量**区（非用户变量那栏）双击 `Path`</li>
-                  <li>删掉上述列出的那几条，一路确定</li>
-                  <li>**新开**命令行窗口，运行 <code>where php</code> 验证（应该只剩 <code>.naxone\bin\php.cmd</code>）</li>
-                </ol>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div class="flex flex-wrap items-center gap-1.5">
           <div v-for="p in phpServices" :key="p.id"
                class="php-chip"
@@ -689,6 +588,16 @@ onUnmounted(() => {
             <span class="opacity-50 text-[9px]">{{ originShort(p) }}</span>
           </div>
         </div>
+      </div>
+
+      <!-- 全局环境只读摘要（编辑去服务配置 → 全局环境 tab） -->
+      <div class="env-summary mb-4" @click="router.push({ path: '/config', query: { tab: 'env' } })">
+        <span class="env-summary-label">全局环境</span>
+        <span class="env-summary-item">PHP <b>{{ globalPhp.version ? `v${globalPhp.version}` : '—' }}</b></span>
+        <span class="env-summary-item">Composer <b>{{ devTools.composer?.active_version ? `v${devTools.composer.active_version}` : '—' }}</b></span>
+        <span class="env-summary-item">Node <b>{{ devTools.nvm?.current_node ? `v${devTools.nvm.current_node}` : '—' }}</b></span>
+        <span class="env-summary-item">MySQL <b>{{ devTools.mysql?.active_version ? `v${devTools.mysql.active_version}` : '—' }}</b></span>
+        <ChevronRight :size="14" class="ml-auto" />
       </div>
 
       <!-- Recent Activity Log (compact) -->
@@ -874,6 +783,39 @@ onUnmounted(() => {
 .cta-card:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* 全局环境只读摘要：1 行卡片，点击跳转 /env */
+.env-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background var(--transition);
+}
+.env-summary:hover {
+  background: var(--bg-hover);
+}
+.env-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.env-summary-item {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.env-summary-item b {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 600;
 }
 
 /* 版本下拉：默认会被 flex-1 父容器撑满，限制成内容宽度 + 上限 */

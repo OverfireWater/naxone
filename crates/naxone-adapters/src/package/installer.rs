@@ -337,6 +337,9 @@ pub fn phpstudy_style_dir_name(name: &str, version: &str) -> String {
         "mysql" => format!("MySQL{}", version),
         "redis" => format!("Redis{}", version),
         "php" => format!("php/php{}nts", version.replace('.', "")),
+        // 工具类放 tools/ 子目录，跟服务包分开
+        "composer" => format!("tools/composer-{}", version),
+        "nvm" => format!("tools/nvm-{}", version),
         other => format!("{}{}", other, version),
     }
 }
@@ -569,6 +572,9 @@ fn finalize_install(
         }
     }
 
+    // 工具类包（composer / nvm）的 post-install：写 shim、改用户 PATH、设环境变量
+    super::post_install::run(&entry.name, final_dir);
+
     let _ = tx.send(InstallEvent::Done {
         name: name.to_string(),
         version: ver.to_string(),
@@ -590,6 +596,8 @@ mod tests {
         assert_eq!(phpstudy_style_dir_name("php", "8.4.2"), "php/php842nts");
         assert_eq!(phpstudy_style_dir_name("php", "8.3.30"), "php/php8330nts");
         assert_eq!(phpstudy_style_dir_name("php", "7.4.33"), "php/php7433nts");
+        assert_eq!(phpstudy_style_dir_name("composer", "2.7.7"), "tools/composer-2.7.7");
+        assert_eq!(phpstudy_style_dir_name("nvm", "1.2.2"), "tools/nvm-1.2.2");
     }
 
     fn tmp(tag: &str) -> PathBuf {

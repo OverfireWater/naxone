@@ -90,8 +90,12 @@ mod tests {
 
     #[test]
     fn manifest_versions_sane() {
+        // 工具类（composer / nvm）没有内嵌版本，靠 mirror manifest 填充 —— 跳过它们。
         let m = load_manifest();
         for p in &m.packages {
+            if p.category == "tool" {
+                continue;
+            }
             assert!(!p.versions.is_empty(), "{} has no versions", p.name);
             for v in &p.versions {
                 let urls = v.candidate_urls();
@@ -109,8 +113,7 @@ mod tests {
 
     #[test]
     fn manifest_has_expected_software() {
-        // Just make sure each package has at least one version. Exact counts
-        // change as new releases land — don't hard-code them.
+        // Service 类必须自带版本（用户离线也能看到列表）；工具类靠 mirror 注入。
         let m = load_manifest();
         for name in ["nginx", "apache", "mysql", "php", "redis"] {
             let pkg = m.packages.iter().find(|p| p.name == name);
@@ -120,6 +123,10 @@ mod tests {
                 "{} has no versions",
                 name
             );
+        }
+        for name in ["composer", "nvm"] {
+            let pkg = m.packages.iter().find(|p| p.name == name);
+            assert!(pkg.is_some(), "missing tool package {}", name);
         }
     }
 

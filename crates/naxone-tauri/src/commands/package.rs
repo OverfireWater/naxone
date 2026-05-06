@@ -30,6 +30,13 @@ pub struct InstalledPackage {
     pub name: String,
     pub version: String,
     pub install_path: String,
+    /// "store" = NaxOne 自己装的；"system" = 系统/用户已有的（仅 composer/nvm）
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "store".to_string()
 }
 
 /// Returns the package catalog: embedded manifest, enriched with live data
@@ -283,10 +290,73 @@ pub async fn get_installed_packages(
             name: name.to_string(),
             version: svc.version.clone(),
             install_path: svc.install_path.display().to_string(),
+            source: "store".into(),
+        });
+    }
+    drop(services);
+
+    // 工具类（composer / nvm）不是 service，扫 packages_root/tools 下的目录推导。
+    let config = state.config.read().await;
+    let packages_root = resolve_packages_root(&config);
+    drop(config);
+    out.extend(scan_tools(&packages_root));
+
+    // 系统/用户已装的工具（仅 composer / nvm）。NaxOne 自己装的会被 detect 模块排除。
+    use naxone_adapters::package::tool_detect;
+    for detected in tool_detect::detect_all(&packages_root) {
+        out.push(InstalledPackage {
+            name: detected.name,
+            version: detected.version,
+            install_path: detected.install_path,
+            source: "system".into(),
         });
     }
 
     Ok(out)
+}
+
+/// 扫 `<packages_root>/tools/` 下形如 `composer-X.Y.Z` / `nvm-X.Y.Z` 的目录，
+/// 返回对应的 InstalledPackage 列表。目录里没有可执行 stub 也算装上 —— 一旦目录在，
+/// 商店就显示"已安装"，避免 zip 解压成功但 post-install 局部失败时前端误判未装。
+fn scan_tools(packages_root: &std::path::Path) -> Vec<InstalledPackage> {
+    let tools_dir = packages_root.join("tools");
+    let mut out = Vec::new();
+    let rd = match std::fs::read_dir(&tools_dir) {
+        Ok(rd) => rd,
+        Err(_) => return out,
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name_os = entry.file_name();
+        let dir_name = name_os.to_string_lossy();
+        if let Some((tool, version)) = parse_tool_dir(&dir_name) {
+            out.push(InstalledPackage {
+                name: tool.to_string(),
+                version: version.to_string(),
+                install_path: path.display().to_string(),
+                source: "store".into(),
+            });
+        }
+    }
+    out
+}
+
+/// "composer-2.7.7" → Some(("composer", "2.7.7"))
+fn parse_tool_dir(dir: &str) -> Option<(&'static str, String)> {
+    for prefix in ["composer-", "nvm-"] {
+        if let Some(rest) = dir.strip_prefix(prefix) {
+            let tool = match prefix {
+                "composer-" => "composer",
+                "nvm-" => "nvm",
+                _ => unreachable!(),
+            };
+            return Some((tool, rest.to_string()));
+        }
+    }
+    None
 }
 
 /// Kick off an install in the background. Returns immediately after validation;
@@ -313,6 +383,24 @@ pub async fn install_package(
         .find(|v| v.version == version)
         .ok_or_else(|| format!("未知版本: {} v{}", name, version))?
         .clone();
+
+    // 工具类（composer / nvm）：系统已经装了就拒绝重装，避免 NaxOne 覆盖用户原有环境
+    // （nvm 装第二份会改 NVM_HOME，原 nvm 的 node 版本"消失"）
+    if matches!(name.as_str(), "composer" | "nvm") {
+        let config = state.config.read().await;
+        let packages_root = resolve_packages_root(&config);
+        drop(config);
+        if let Some(detected) =
+            naxone_adapters::package::tool_detect::detect(&name, &packages_root)
+        {
+            let msg = format!(
+                "{} 已经在系统中安装（v{}，路径 {}），无需通过 NaxOne 商店重装。",
+                pkg.display_name, detected.version, detected.install_path
+            );
+            push_log(&state, LogLevel::Warn, "store", msg.clone(), None, None).await;
+            return Err(msg);
+        }
+    }
 
     // Guard: if this exact (kind, version) service is already running, refuse
     // the install cleanly — overwriting would race with the OS file lock and
@@ -500,25 +588,24 @@ pub async fn uninstall_package(
         .find(|v| v.version == version)
         .ok_or_else(|| format!("未知版本: {} v{}", name, version))?;
 
+    // 服务类用 ServiceKind 检查 origin / running；工具类（composer/nvm）跳过这一段。
     let target_kind = match name.as_str() {
-        "nginx" => ServiceKind::Nginx,
-        "apache" => ServiceKind::Apache,
-        "mysql" => ServiceKind::Mysql,
-        "redis" => ServiceKind::Redis,
-        "php" => ServiceKind::Php,
+        "nginx" => Some(ServiceKind::Nginx),
+        "apache" => Some(ServiceKind::Apache),
+        "mysql" => Some(ServiceKind::Mysql),
+        "redis" => Some(ServiceKind::Redis),
+        "php" => Some(ServiceKind::Php),
+        "composer" | "nvm" => None,
         _ => return Err(format!("未知软件类型: {}", name)),
     };
 
-    // Origin 校验 + 运行检查（一次读锁搞定）
-    {
+    if let Some(kind) = target_kind {
         use naxone_core::domain::service::ServiceOrigin;
         let services = state.services.read().await;
         let matches: Vec<_> = services
             .iter()
-            .filter(|s| s.kind == target_kind && s.version == version)
+            .filter(|s| s.kind == kind && s.version == version)
             .collect();
-        // 若该版本只存在 PhpStudy 源（没有商店源副本），明确拒绝
-        // 仅靠下面的 packages_root 路径边界也能挡住，但先给用户友好提示
         if !matches.is_empty() && matches.iter().all(|s| s.origin == ServiceOrigin::PhpStudy) {
             let msg = "不能卸载 PHPStudy 自带的软件".to_string();
             push_log(&state, LogLevel::Warn, "store", msg.clone(), None, None).await;
@@ -548,6 +635,11 @@ pub async fn uninstall_package(
         let msg = format!("{} v{} 未安装（目录不存在）", pkg.display_name, version);
         push_log(&state, LogLevel::Info, "store", msg, None, None).await;
         return Ok(());
+    }
+
+    // 工具类先清用户 PATH / 环境变量（趁目录还在，可读出绝对路径作 PATH 比对值）
+    if matches!(name.as_str(), "composer" | "nvm") {
+        naxone_adapters::package::post_install::uninstall(&name, &target_dir);
     }
 
     // Actually delete
@@ -592,4 +684,205 @@ pub async fn uninstall_package(
     let _ = app.emit("services-changed", ());
 
     Ok(())
+}
+
+/// 「解除关联」系统已装的 composer/nvm：仅清 PATH / 环境变量，不删任何文件。
+/// 用于卡片标 source="system" 的工具，UI 上是「解除关联」按钮。
+#[tauri::command]
+pub async fn unlink_system_tool(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<naxone_adapters::package::post_install::UnlinkReport, String> {
+    if !matches!(name.as_str(), "composer" | "nvm") {
+        return Err(format!("不支持的工具: {}", name));
+    }
+    let config = state.config.read().await;
+    let packages_root = resolve_packages_root(&config);
+    drop(config);
+    let detected = naxone_adapters::package::tool_detect::detect(&name, &packages_root)
+        .ok_or_else(|| format!("未检测到系统已装的 {}", name))?;
+    let install_path = std::path::PathBuf::from(&detected.install_path);
+    let report = naxone_adapters::package::post_install::unlink(&name, &install_path);
+
+    let level = if report.errors.is_empty() {
+        LogLevel::Success
+    } else {
+        LogLevel::Warn
+    };
+    push_log(
+        &state,
+        level,
+        "store",
+        format!("已解除与 {} v{} 的关联", name, detected.version),
+        Some(format!(
+            "清 {} 项环境/PATH，错误 {} 条",
+            report.cleared.len(),
+            report.errors.len()
+        )),
+        None,
+    )
+    .await;
+
+    let _ = app.emit("services-changed", ());
+    Ok(report)
+}
+
+/// 「彻底卸载」系统已装的 composer/nvm：删核心本体文件 + 清环境变量。
+/// 保留用户数据（COMPOSER_HOME 全局包 / NVM_HOME 下的 node 版本目录）。
+#[tauri::command]
+pub async fn deep_uninstall_system_tool(
+    name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<naxone_adapters::package::post_install::DeepUninstallReport, String> {
+    if !matches!(name.as_str(), "composer" | "nvm") {
+        return Err(format!("不支持的工具: {}", name));
+    }
+    let config = state.config.read().await;
+    let packages_root = resolve_packages_root(&config);
+    drop(config);
+    let detected = naxone_adapters::package::tool_detect::detect(&name, &packages_root)
+        .ok_or_else(|| format!("未检测到系统已装的 {}", name))?;
+    let install_path = std::path::PathBuf::from(&detected.install_path);
+    let report = naxone_adapters::package::post_install::deep_uninstall(&name, &install_path);
+
+    let level = if report.errors.is_empty() {
+        LogLevel::Success
+    } else {
+        LogLevel::Warn
+    };
+    push_log(
+        &state,
+        level,
+        "store",
+        format!("彻底卸载 {} v{}", name, detected.version),
+        Some(format!(
+            "删文件 {}，清环境 {}，保留用户数据 {} 项，错误 {} 条",
+            report.deleted_files.len(),
+            report.cleared_env.len(),
+            report.kept_paths.len(),
+            report.errors.len()
+        )),
+        None,
+    )
+    .await;
+
+    let _ = app.emit("services-changed", ());
+    Ok(report)
+}
+
+/// 「预览」系统已装工具的彻底卸载详情：返回会删/会保留的路径列表。
+/// 前端用来填卸载确认对话框。**不实际操作**任何文件或环境变量。
+#[tauri::command]
+pub async fn preview_system_tool_uninstall(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<UninstallPreview, String> {
+    if !matches!(name.as_str(), "composer" | "nvm") {
+        return Err(format!("不支持的工具: {}", name));
+    }
+    let config = state.config.read().await;
+    let packages_root = resolve_packages_root(&config);
+    drop(config);
+    let detected = naxone_adapters::package::tool_detect::detect(&name, &packages_root)
+        .ok_or_else(|| format!("未检测到系统已装的 {}", name))?;
+    let install_path = std::path::PathBuf::from(&detected.install_path);
+
+    let mut will_delete: Vec<String> = Vec::new();
+    let mut will_keep: Vec<String> = Vec::new();
+
+    match name.as_str() {
+        "composer" => {
+            // 列出会被删的 composer 文件
+            if let Ok(rd) = std::fs::read_dir(&install_path) {
+                for entry in rd.flatten() {
+                    let fname = entry.file_name();
+                    let lower = fname.to_string_lossy().to_ascii_lowercase();
+                    let is_composer_file = lower == "composer"
+                        || lower.starts_with("composer.")
+                        || lower.starts_with("composer-");
+                    if is_composer_file && entry.path().is_file() {
+                        will_delete.push(entry.path().display().to_string());
+                    }
+                }
+            }
+            // COMPOSER_HOME 列为保留
+            if let Ok(home) = std::env::var("USERPROFILE") {
+                let composer_home = std::path::PathBuf::from(home)
+                    .join("AppData")
+                    .join("Roaming")
+                    .join("Composer");
+                if composer_home.exists() {
+                    will_keep.push(composer_home.display().to_string());
+                }
+            }
+        }
+        "nvm" => {
+            if let Ok(rd) = std::fs::read_dir(&install_path) {
+                for entry in rd.flatten() {
+                    let fname = entry.file_name();
+                    let s = fname.to_string_lossy().to_string();
+                    let p = entry.path();
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+                    // node 版本目录 → 保留
+                    if is_dir
+                        && s.starts_with('v')
+                        && s.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+                    {
+                        will_keep.push(p.display().to_string());
+                        continue;
+                    }
+                    // current symlink + 核心本体 → 删
+                    if s == "nodejs"
+                        || NVM_PREVIEW_CORE_FILES
+                            .iter()
+                            .any(|f| f.eq_ignore_ascii_case(&s))
+                    {
+                        will_delete.push(p.display().to_string());
+                    }
+                }
+            }
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(UninstallPreview {
+        name,
+        version: detected.version,
+        install_path: detected.install_path,
+        will_delete,
+        will_keep,
+    })
+}
+
+/// 与 `post_install::NVM_CORE_FILES` 同步的预览版本（提供给 IPC 前端展示用）。
+const NVM_PREVIEW_CORE_FILES: &[&str] = &[
+    "nvm.exe",
+    "elevate.cmd",
+    "elevate.vbs",
+    "setuserenv.vbs",
+    "unsetuserenv.vbs",
+    "settings.txt",
+    "LICENSE",
+    "README.md",
+    "nvm.ico",
+    "nodejs.ico",
+    "alert.ico",
+    "author.ico",
+    "download.ico",
+    "success.ico",
+    "author-nvm.exe",
+    "install.cmd",
+    "run.cmd",
+];
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UninstallPreview {
+    pub name: String,
+    pub version: String,
+    pub install_path: String,
+    pub will_delete: Vec<String>,
+    pub will_keep: Vec<String>,
 }

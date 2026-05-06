@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "../composables/useToast";
 import SelectMenu from "../components/SelectMenu.vue";
+import GlobalEnv from "./GlobalEnv.vue";
 
-type Tab = "nginx" | "mysql" | "redis" | "php" | "hosts";
-const activeTab = ref<Tab>("nginx");
+type Tab = "nginx" | "mysql" | "redis" | "php" | "hosts" | "env";
+const route = useRoute();
+const router = useRouter();
+const activeTab = ref<Tab>("env");
+
+function setTab(t: Tab) {
+  activeTab.value = t;
+  // 同步到 URL；env 是默认 tab，省略 query 让 URL 更干净
+  router.replace({ path: "/config", query: t === "env" ? {} : { tab: t } });
+}
 const busy = ref(false);
 const saved = ref(false);
 const boolOptions = [
@@ -244,19 +254,28 @@ function loadTab() {
   if (activeTab.value === "redis" && !redis.value) loadRedis();
   if (activeTab.value === "php" && phpInstances.value.length === 0) { loadPhpInstances(); }
   if (activeTab.value === "hosts" && !hostsPath.value) { loadHosts(); }
+  // env tab 自带数据加载（GlobalEnv 组件 onMounted 拉取），这里不用做事
 }
 watch(activeTab, loadTab);
-onMounted(loadTab);
+onMounted(() => {
+  // 支持 /config?tab=xxx 直接定位
+  const q = route.query.tab;
+  if (typeof q === "string" && (["nginx","mysql","redis","php","hosts","env"] as const).includes(q as Tab)) {
+    activeTab.value = q as Tab;
+  }
+  loadTab();
+});
 </script>
 
 <template>
   <div class="max-w-[960px] has-save-bar">
     <div class="tabs-row">
-      <button class="tab" :class="{ active: activeTab === 'nginx' }" @click="activeTab = 'nginx'">Nginx</button>
-      <button class="tab" :class="{ active: activeTab === 'mysql' }" @click="activeTab = 'mysql'">MySQL</button>
-      <button class="tab" :class="{ active: activeTab === 'redis' }" @click="activeTab = 'redis'">Redis</button>
-      <button class="tab" :class="{ active: activeTab === 'php' }" @click="activeTab = 'php'">PHP</button>
-      <button class="tab" :class="{ active: activeTab === 'hosts' }" @click="activeTab = 'hosts'">Hosts</button>
+      <button class="tab tab-env" :class="{ active: activeTab === 'env' }" @click="setTab('env')">全局环境</button>
+      <button class="tab" :class="{ active: activeTab === 'nginx' }" @click="setTab('nginx')">Nginx</button>
+      <button class="tab" :class="{ active: activeTab === 'mysql' }" @click="setTab('mysql')">MySQL</button>
+      <button class="tab" :class="{ active: activeTab === 'redis' }" @click="setTab('redis')">Redis</button>
+      <button class="tab" :class="{ active: activeTab === 'php' }" @click="setTab('php')">PHP</button>
+      <button class="tab" :class="{ active: activeTab === 'hosts' }" @click="setTab('hosts')">Hosts</button>
     </div>
 
     <!-- ==================== Nginx ==================== -->
@@ -380,8 +399,8 @@ onMounted(loadTab);
     <div v-if="activeTab === 'php'" class="tab-card p-6">
       <!-- PHP Version Selector -->
       <div class="flex items-center justify-between mb-5 gap-4">
-        <SelectMenu v-if="phpInstances.length > 0" :model-value="selectedPhp?.id ?? null" :options="phpInstanceOptions" full-width trigger-class="input w-[200px] shrink-0" @update:modelValue="selectPhpInstance($event)" />
-        <div class="flex gap-1">
+        <SelectMenu v-if="phpInstances.length > 0" :model-value="selectedPhp?.id ?? null" :options="phpInstanceOptions" trigger-class="input w-[240px] shrink-0" @update:modelValue="selectPhpInstance($event)" />
+        <div class="flex gap-1 shrink-0">
           <button
             v-for="st in [{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'}]" :key="st.k"
             class="px-4 py-1.5 rounded-md text-[13px] cursor-pointer transition-all border"
@@ -471,8 +490,15 @@ onMounted(loadTab);
       ></textarea>
     </div>
 
-    <!-- Unified save bar -->
-    <div class="save-bar">
+    <!-- ==================== 全局环境 ==================== -->
+    <!-- v-show 而非 v-if：进入 /config 即挂载 GlobalEnv 在后台拉数据，
+         切到该 tab 时无网络等待。 -->
+    <div v-show="activeTab === 'env'" class="tab-card p-6">
+      <GlobalEnv />
+    </div>
+
+    <!-- Unified save bar （env tab 自带操作按钮，不需要统一保存条） -->
+    <div v-if="activeTab !== 'env'" class="save-bar">
       <button v-if="(activeTab === 'nginx' && nginx) || (activeTab === 'mysql' && mysql) || (activeTab === 'redis' && redis) || (activeTab === 'php' && phpSubTab === 'settings' && phpIni) || activeTab === 'hosts'"
               class="btn btn-success btn-sm" :disabled="busy || (activeTab === 'hosts' && !hostsDirty())"
               @click="activeTab === 'nginx' ? saveNginx() : activeTab === 'mysql' ? saveMysql() : activeTab === 'redis' ? saveRedis() : activeTab === 'php' ? savePhpIni() : saveHosts()">
