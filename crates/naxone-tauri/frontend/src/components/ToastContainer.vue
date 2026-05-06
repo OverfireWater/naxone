@@ -55,6 +55,8 @@ const iconMap = {
   border: 1px solid var(--border-color);
   /* 深色底 + 主文字色，保证在任意背景上都高对比 */
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   color: var(--text-primary);
   cursor: default;
   word-break: break-word;

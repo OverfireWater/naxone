@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -51,13 +51,13 @@ async function close() { await appWindow.close(); }
 
 <template>
   <div class="app-shell flex flex-col h-screen">
-    <div class="flex items-center justify-between h-9 shrink-0 border-b"
-         style="background: var(--bg-titlebar); border-color: var(--border-color)">
+    <div class="flex items-center justify-between h-9 shrink-0"
+         style="background: transparent">
       <div class="flex-1 h-full flex items-center gap-2.5 pl-4 titlebar-drag" data-tauri-drag-region>
         <div class="w-5 h-5 bg-gradient-to-br from-indigo-500 to-blue-400 rounded-md flex items-center justify-center titlebar-drag" data-tauri-drag-region>
-          <span class="text-[10px] font-bold text-white leading-none titlebar-drag" data-tauri-drag-region>R</span>
+          <span class="text-[13px] font-bold text-white leading-none titlebar-drag" data-tauri-drag-region>R</span>
         </div>
-        <span class="text-xs font-medium titlebar-drag" style="color: var(--text-muted)" data-tauri-drag-region>{{ APP_NAME }}</span>
+        <span class="text-[13px] font-medium titlebar-drag" style="color: var(--text-muted)" data-tauri-drag-region>{{ APP_NAME }}</span>
       </div>
       <div class="flex h-full titlebar-no-drag">
         <button class="w-11 h-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors duration-200 hover:bg-[var(--bg-hover)] titlebar-no-drag"
@@ -76,9 +76,9 @@ async function close() { await appWindow.close(); }
     </div>
 
     <div class="flex flex-1 overflow-hidden titlebar-no-drag">
-      <aside class="flex flex-col shrink-0 transition-all duration-300 ease-in-out border-r titlebar-no-drag"
+      <aside class="flex flex-col shrink-0 transition-all duration-300 ease-in-out titlebar-no-drag"
              :class="collapsed ? 'w-[60px]' : 'w-[220px]'"
-             style="background: var(--bg-secondary); border-color: var(--border-color)">
+             style="background: transparent">
         <nav class="flex-1 p-3 flex flex-col gap-1 mt-1">
           <div
             v-for="item in menuItems"
@@ -103,20 +103,24 @@ async function close() { await appWindow.close(); }
                  }">
               <component :is="item.icon" :size="16" :stroke-width="2" />
             </div>
-            <span v-if="!collapsed" class="text-[13px] whitespace-nowrap">{{ item.label }}</span>
+            <span v-if="!collapsed" class="text-[16px] whitespace-nowrap">{{ item.label }}</span>
           </div>
         </nav>
-        <div class="p-3 border-t flex items-center cursor-pointer transition-colors duration-200"
-             style="border-color: var(--border-color); color: var(--text-muted)"
+        <div class="p-3 flex items-center cursor-pointer transition-colors duration-200"
+             style="color: var(--text-muted)"
              :class="collapsed ? 'justify-center' : ''"
              @click="collapsed = !collapsed">
           <component :is="collapsed ? ChevronRight : ChevronLeft" :size="14" />
-          <span v-if="!collapsed && appVersion" class="text-[11px] ml-auto" style="color: var(--text-muted)">v{{ appVersion }}</span>
+          <span v-if="!collapsed && appVersion" class="text-[13px] ml-auto" style="color: var(--text-muted)">v{{ appVersion }}</span>
         </div>
       </aside>
 
-      <main class="flex-1 overflow-y-auto px-5 py-4 titlebar-no-drag" style="background: var(--bg-primary)">
-        <router-view />
+      <main class="flex-1 overflow-y-auto px-5 py-4 titlebar-no-drag" style="background: transparent">
+        <router-view v-slot="{ Component }">
+          <KeepAlive>
+            <component :is="Component" />
+          </KeepAlive>
+        </router-view>
       </main>
     </div>
 

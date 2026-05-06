@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown } from "lucide-vue-next";
 
@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 6px;
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-primary);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
@@ -195,6 +195,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   overflow-y: auto;
 }
@@ -204,7 +206,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--text-primary);
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;

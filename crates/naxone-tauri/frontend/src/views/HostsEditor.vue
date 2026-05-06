@@ -1,8 +1,9 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { toast } from "../composables/useToast";
+import { onTextareaTab } from "../composables/useTextareaTab";
 
 const content = ref("");
 const original = ref("");
@@ -78,14 +79,16 @@ onMounted(loadHosts);
   <div class="max-w-[960px]">
     <div class="card mb-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="text-sm font-medium text-content-secondary">系统 Hosts 文件</div>
+        <div class="text-[16px] font-medium text-content-secondary">系统 Hosts 文件</div>
         <button class="btn btn-secondary btn-sm" @click="openHostsExternally">系统编辑器打开</button>
       </div>
-      <div class="text-xs text-content-muted mb-2 break-all">{{ hostsPath || "加载中..." }}</div>
+      <div class="text-[13px] text-content-muted mb-2 break-all">{{ hostsPath || "加载中..." }}</div>
       <textarea
-        class="input font-mono text-xs leading-5 w-full min-h-[420px]"
+        class="input font-mono text-[13px] leading-5 w-full min-h-[420px]"
         style="resize: vertical"
         v-model="content"
+        spellcheck="false"
+        @keydown="onTextareaTab"
         placeholder="# 在这里编辑 hosts 内容"
       ></textarea>
     </div>

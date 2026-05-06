@@ -1,9 +1,9 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { AlertTriangle } from "lucide-vue-next";
+import { AlertTriangle, Eye, EyeOff } from "lucide-vue-next";
 import SelectMenu from "../components/SelectMenu.vue";
 import { toast } from "../composables/useToast";
 
@@ -297,12 +297,12 @@ onUnmounted(() => {
         <div v-if="globalPhp.conflicts.length > 0" class="conflict-banner mt-3">
           <div class="flex items-start gap-2">
             <AlertTriangle :size="16" class="shrink-0 mt-0.5" style="color: var(--color-warn, #f59e0b)" />
-            <div class="flex-1 text-[12px]">
+            <div class="flex-1 text-[13px]">
               <div class="font-semibold mb-1">全局切换可能不生效</div>
               <div class="mb-1" style="color: var(--text-secondary)">
                 系统 PATH 里有 {{ globalPhp.conflicts.length }} 条 PHP 目录排在本应用前面，<code>php -v</code> 会优先命中它们。
               </div>
-              <div class="font-mono text-[11px] mb-2 pl-2" style="color: var(--text-muted)">
+              <div class="font-mono text-[13px] mb-2 pl-2" style="color: var(--text-muted)">
                 <div v-for="c in globalPhp.conflicts" :key="c">· {{ c }}</div>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
@@ -312,13 +312,13 @@ onUnmounted(() => {
                   {{ conflictFixBusy ? '修复中...' : '一键修复（需管理员）' }}
                 </button>
                 <button class="btn btn-secondary btn-sm" @click="openEnvEditor">打开环境变量窗口</button>
-                <button class="text-[11px] underline cursor-pointer"
+                <button class="text-[13px] underline cursor-pointer"
                         style="color: var(--color-blue-light); background: transparent; border: none"
                         @click="showConflictHelp = !showConflictHelp">
                   {{ showConflictHelp ? '隐藏手动步骤' : '手动步骤？' }}
                 </button>
               </div>
-              <div v-if="showConflictHelp" class="mt-2 text-[11px] leading-relaxed"
+              <div v-if="showConflictHelp" class="mt-2 text-[13px] leading-relaxed"
                    style="color: var(--text-secondary)">
                 <ol class="list-decimal pl-4 space-y-0.5">
                   <li>点上面"打开环境变量窗口"按钮</li>
@@ -437,12 +437,12 @@ onUnmounted(() => {
         <div v-if="devTools.mysql.conflicts.length > 0" class="conflict-banner mt-3">
           <div class="flex items-start gap-2">
             <AlertTriangle :size="16" class="shrink-0 mt-0.5" style="color: var(--color-warn)" />
-            <div class="flex-1 text-[12px]">
+            <div class="flex-1 text-[13px]">
               <div class="font-semibold mb-1">"设为全局"可能不生效</div>
               <div class="mb-1" style="color: var(--text-secondary)">
                 系统 PATH 里有 {{ devTools.mysql.conflicts.length }} 条 MySQL 目录排在用户 PATH 前面，<code>mysql --version</code> 会优先命中它们。
               </div>
-              <div class="font-mono text-[11px] mb-2 pl-2" style="color: var(--text-muted)">
+              <div class="font-mono text-[13px] mb-2 pl-2" style="color: var(--text-muted)">
                 <div v-for="c in devTools.mysql.conflicts" :key="c">· {{ c }}</div>
               </div>
               <button class="btn btn-primary btn-sm"
@@ -456,17 +456,19 @@ onUnmounted(() => {
 
         <div v-if="currentMysqlOption" class="env-row">
           <span class="env-label">root 密码</span>
-          <input
-            :type="showMysqlPwd ? 'text' : 'password'"
-            v-model="mysqlPwdInput"
-            :placeholder="currentMysqlOption.root_password ? `当前：${currentMysqlOption.root_password}（输入新密码）` : '输入新密码'"
-            class="env-pwd-input"
-          />
-          <button class="btn btn-secondary btn-sm" type="button"
-                  :title="showMysqlPwd ? '隐藏' : '显示'"
-                  @click="showMysqlPwd = !showMysqlPwd">
-            {{ showMysqlPwd ? '隐藏' : '显示' }}
-          </button>
+          <div class="env-pwd-wrap">
+            <input
+              :type="showMysqlPwd ? 'text' : 'password'"
+              v-model="mysqlPwdInput"
+              :placeholder="currentMysqlOption.root_password ? '已保存当前密码（输入新密码可修改）' : '输入 root 密码'"
+              class="env-pwd-input"
+            />
+            <button class="env-pwd-toggle" type="button"
+                    :title="showMysqlPwd ? '隐藏' : '显示'"
+                    @click="showMysqlPwd = !showMysqlPwd">
+              <component :is="showMysqlPwd ? EyeOff : Eye" :size="16" />
+            </button>
+          </div>
           <button class="btn btn-primary btn-sm"
                   :disabled="!mysqlPwdInput || mysqlPwdBusy"
                   @click="saveMysqlPassword">
@@ -514,7 +516,7 @@ onUnmounted(() => {
 }
 
 .page-subtitle {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-bottom: 12px;
 }
@@ -528,7 +530,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 .env-section-sub {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -543,23 +545,23 @@ onUnmounted(() => {
   border-top: 1px solid var(--border-color);
 }
 .env-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   min-width: 72px;
   flex-shrink: 0;
 }
 .env-value {
-  font-size: 12px;
+  font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   color: var(--color-success-light);
 }
 .env-port {
-  font-size: 11px;
+  font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   color: var(--text-muted);
 }
 .env-source-badge {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
@@ -570,15 +572,20 @@ onUnmounted(() => {
   color: var(--color-warn, #f59e0b);
 }
 .env-empty {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
-.env-pwd-input {
+.env-pwd-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
+  display: flex;
+}
+.env-pwd-input {
+  width: 100%;
   height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
+  padding: 0 36px 0 10px;
+  font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
@@ -588,6 +595,27 @@ onUnmounted(() => {
 .env-pwd-input:focus {
   outline: none;
   border-color: var(--border-focus);
+}
+.env-pwd-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 150ms ease, background 150ms ease;
+}
+.env-pwd-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .conflict-banner {
@@ -612,6 +640,6 @@ code {
   background: var(--bg-tertiary);
   padding: 1px 4px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 13px;
 }
 </style>

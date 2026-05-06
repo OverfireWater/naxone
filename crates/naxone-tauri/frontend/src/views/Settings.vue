@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "../composables/useToast";
@@ -70,7 +70,7 @@ onMounted(() => { loadConfig(); });
 
     <!-- Theme -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">外观主题</h2>
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">外观主题</h2>
       <div class="flex gap-3">
         <label
           v-for="t in [{v:'dark',icon:'☾',l:'暗色'},{v:'light',icon:'☀',l:'亮色'},{v:'auto',icon:'◐',l:'跟随系统'}]"
@@ -81,26 +81,26 @@ onMounted(() => { loadConfig(); });
         >
           <input type="radio" v-model="themeMode" :value="t.v" class="hidden" />
           <span class="text-lg">{{ t.icon }}</span>
-          <span class="text-sm">{{ t.l }}</span>
+          <span class="text-[16px]">{{ t.l }}</span>
         </label>
       </div>
     </div>
 
     <!-- General -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">基本设置</h2>
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">基本设置</h2>
       <div class="grid grid-cols-1 gap-4">
         <div class="flex flex-col gap-1.5">
-          <label class="text-[13px] text-content-secondary font-medium">PHPStudy 安装路径</label>
+          <label class="text-[16px] text-content-secondary font-medium">PHPStudy 安装路径</label>
           <input class="input" v-model="config.phpstudy_path" placeholder="D:\phpstudy_pro" />
-          <p class="text-xs text-content-muted mt-1">扫描此目录下的 Extensions 发现已安装的服务；默认站点目录使用 NaxOne 自己管理的 www 路径，不跟随 PHPStudy 的 WWW</p>
+          <p class="text-[13px] text-content-muted mt-1">扫描此目录下的 Extensions 发现已安装的服务；默认站点目录使用 NaxOne 自己管理的 www 路径，不跟随 PHPStudy 的 WWW</p>
         </div>
       </div>
     </div>
 
     <!-- Web Server -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">Web 服务器</h2>
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">Web 服务器</h2>
       <div class="flex gap-3">
         <label
           v-for="ws in [{v:'nginx',c:'#009639',i:'N'},{v:'apache',c:'#d22128',i:'A'}]"
@@ -109,23 +109,23 @@ onMounted(() => { loadConfig(); });
           :class="config.active_web_server === ws.v ? 'border-accent-blue bg-[rgba(29,78,216,0.1)]' : ''"
         >
           <input type="radio" v-model="config.active_web_server" :value="ws.v" class="hidden" />
-          <span class="w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white" :style="{ background: ws.c }">{{ ws.i }}</span>
-          <span class="text-sm capitalize">{{ ws.v }}</span>
+          <span class="w-6 h-6 rounded flex items-center justify-center text-[13px] font-bold text-white" :style="{ background: ws.c }">{{ ws.i }}</span>
+          <span class="text-[16px] capitalize">{{ ws.v }}</span>
         </label>
       </div>
-      <p class="text-xs text-content-muted mt-2.5">"全部启动" 时只启动选中的 Web 服务器</p>
+      <p class="text-[13px] text-content-muted mt-2.5">"全部启动" 时只启动选中的 Web 服务器</p>
     </div>
 
     <!-- Ports -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">端口配置</h2>
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">端口配置</h2>
       <div class="grid grid-cols-2 gap-4">
         <div class="flex flex-col gap-1.5">
-          <label class="text-[13px] text-content-secondary font-medium">MySQL 端口</label>
+          <label class="text-[16px] text-content-secondary font-medium">MySQL 端口</label>
           <input class="input" type="number" v-model.number="config.mysql_port" min="1" max="65535" />
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[13px] text-content-secondary font-medium">Redis 端口</label>
+          <label class="text-[16px] text-content-secondary font-medium">Redis 端口</label>
           <input class="input" type="number" v-model.number="config.redis_port" min="1" max="65535" />
         </div>
       </div>
@@ -133,10 +133,10 @@ onMounted(() => { loadConfig(); });
 
     <!-- Auto Start -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">自动启动</h2>
-      <p class="text-xs text-content-muted mb-3">选择应用启动时自动启动的服务</p>
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">自动启动</h2>
+      <p class="text-[13px] text-content-muted mb-3">选择应用启动时自动启动的服务</p>
       <div class="flex flex-wrap gap-3">
-        <label v-for="svc in ['nginx','apache','mysql','redis']" :key="svc" class="flex items-center gap-2 text-sm cursor-pointer">
+        <label v-for="svc in ['nginx','apache','mysql','redis']" :key="svc" class="flex items-center gap-2 text-[16px] cursor-pointer">
           <input type="checkbox" :checked="config.auto_start.includes(svc)" @change="toggleAutoStart(svc)" class="accent-accent-success w-4 h-4" />
           <span class="capitalize">{{ svc }}</span>
         </label>
@@ -145,27 +145,27 @@ onMounted(() => { loadConfig(); });
 
     <!-- Exit behavior -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">退出行为</h2>
-      <label class="flex items-center gap-2 text-sm cursor-pointer mb-2">
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">退出行为</h2>
+      <label class="flex items-center gap-2 text-[16px] cursor-pointer mb-2">
         <input type="checkbox" v-model="config.stop_services_on_exit" class="accent-accent-success w-4 h-4" />
         <span>退出应用时自动停止所有服务</span>
       </label>
-      <p class="text-xs text-content-muted">仅托盘菜单“退出”生效；点窗口右上角关闭只是最小化到托盘。</p>
+      <p class="text-[13px] text-content-muted">仅托盘菜单“退出”生效；点窗口右上角关闭只是最小化到托盘。</p>
     </div>
 
     <!-- Log Settings -->
     <div class="card mb-3">
-      <h2 class="text-sm font-medium text-content-secondary mb-3">日志设置</h2>
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">日志设置</h2>
       <div class="grid grid-cols-2 gap-4">
         <div class="flex flex-col gap-1.5 col-span-2">
-          <label class="text-[13px] text-content-secondary font-medium">日志目录 <span class="text-xs text-content-muted font-normal">留空使用默认（exe 同级 logs/）</span></label>
+          <label class="text-[16px] text-content-secondary font-medium">日志目录 <span class="text-[13px] text-content-muted font-normal">留空使用默认（exe 同级 logs/）</span></label>
           <div class="flex gap-2">
             <input class="input flex-1" v-model="config.log_dir" placeholder="默认位置" />
             <button class="btn btn-secondary btn-sm" @click="openLogDir">打开目录</button>
           </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[13px] text-content-secondary font-medium">保留天数</label>
+          <label class="text-[16px] text-content-secondary font-medium">保留天数</label>
           <SelectMenu v-model="config.log_retention_days" :options="logRetentionOptions" full-width trigger-class="input" />
         </div>
       </div>

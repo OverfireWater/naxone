@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -275,13 +275,13 @@ watch(selectedVersion, () => {
       </div>
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-1.5">
-          <div class="text-sm font-semibold truncate">{{ pkg.display_name }}</div>
-          <span v-if="installedVersions.length > 0" class="text-[10px] px-1.5 py-px rounded font-semibold shrink-0"
+          <div class="text-[16px] font-semibold truncate">{{ pkg.display_name }}</div>
+          <span v-if="installedVersions.length > 0" class="text-[13px] px-1.5 py-px rounded font-semibold shrink-0"
                 style="background: rgba(34,197,94,0.18); color: var(--color-success-light)">
             {{ installedVersions.length }} 个版本已装
           </span>
         </div>
-        <div v-if="pkg.description" class="text-[11px] mt-0.5 line-clamp-2" style="color: var(--text-muted)">
+        <div v-if="pkg.description" class="text-[13px] mt-0.5 line-clamp-2" style="color: var(--text-muted)">
           {{ pkg.description }}
         </div>
       </div>
@@ -289,7 +289,7 @@ watch(selectedVersion, () => {
 
     <div class="flex items-center gap-2 mb-3">
       <SelectMenu v-model="selectedVersion" :options="allVersionOptions" :disabled="isBusy" full-width trigger-class="input" />
-      <span v-if="currentVersion?.size_mb" class="text-[11px] font-mono shrink-0" style="color: var(--text-muted)">~{{ currentVersion.size_mb }}MB</span>
+      <span v-if="currentVersion?.size_mb" class="text-[13px] font-mono shrink-0" style="color: var(--text-muted)">~{{ currentVersion.size_mb }}MB</span>
     </div>
 
     <div class="store-action">
@@ -385,7 +385,7 @@ watch(selectedVersion, () => {
         <button class="btn btn-secondary btn-sm !px-2" :disabled="uninstalling" @click="uninstallMode = 'none'">×</button>
       </div>
       <div class="deep-modal-body">
-        <div class="text-[12px] mb-2" style="color: var(--text-muted)">
+        <div class="text-[13px] mb-2" style="color: var(--text-muted)">
           系统已装路径：<span class="font-mono">{{ preview.install_path }}</span>
         </div>
 
@@ -409,7 +409,7 @@ watch(selectedVersion, () => {
             <li>用户 PATH 中的相关条目</li>
           </ul>
         </div>
-        <div v-if="errorMsg" class="text-[12px] text-red-400 mt-2">{{ errorMsg }}</div>
+        <div v-if="errorMsg" class="text-[13px] text-red-400 mt-2">{{ errorMsg }}</div>
       </div>
       <div class="deep-modal-actions">
         <button class="btn btn-secondary btn-sm" :disabled="uninstalling" @click="uninstallMode = 'none'">取消</button>
@@ -424,6 +424,8 @@ watch(selectedVersion, () => {
 <style scoped>
 .store-card {
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 14px;
@@ -467,7 +469,7 @@ watch(selectedVersion, () => {
   border-radius: 6px;
   background: rgba(239, 68, 68, 0.12);
   color: #fca5a5;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.3;
 }
 .inline-error-close {
@@ -490,7 +492,7 @@ watch(selectedVersion, () => {
   border-radius: 6px;
   background: rgba(34, 197, 94, 0.1);
   color: var(--color-success-light);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -517,7 +519,7 @@ watch(selectedVersion, () => {
 .progress-text {
   position: relative;
   z-index: 1;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -546,6 +548,8 @@ watch(selectedVersion, () => {
 }
 .deep-modal {
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   width: 100%;
@@ -579,7 +583,7 @@ watch(selectedVersion, () => {
   margin-bottom: 10px;
 }
 .section-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   margin-bottom: 4px;
   text-transform: uppercase;
@@ -589,7 +593,7 @@ watch(selectedVersion, () => {
   list-style: none;
   padding: 0;
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   background: var(--bg-tertiary);
   border-radius: 4px;
   padding: 6px 8px;
@@ -607,7 +611,7 @@ watch(selectedVersion, () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--color-danger-light);
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);

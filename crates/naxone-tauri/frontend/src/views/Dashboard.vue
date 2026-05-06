@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, ChevronRight, Store, Settings2, RefreshCw } from "lucide-vue-next";
@@ -447,9 +447,9 @@ onUnmounted(() => {
     <!-- 外部进程提醒：占着关键端口但不在我们管理的安装目录里的进程 -->
     <div v-for="s in strangers" :key="s.pid" class="stranger-banner mb-2">
       <AlertTriangle :size="16" class="shrink-0" style="color: var(--color-warn)" />
-      <span class="text-[13px] flex-1 min-w-0 truncate">
+      <span class="text-[16px] flex-1 min-w-0 truncate">
         检测到外部 <b>{{ s.kind }}</b> 占用端口 <b>{{ s.port }}</b>
-        <span class="font-mono text-[11px] ml-1 opacity-70">{{ s.exe_path }} (PID {{ s.pid }})</span>
+        <span class="font-mono text-[13px] ml-1 opacity-70">{{ s.exe_path }} (PID {{ s.pid }})</span>
       </span>
       <div class="flex gap-1.5 shrink-0">
         <button class="btn btn-danger btn-sm"
@@ -463,7 +463,7 @@ onUnmounted(() => {
 
     <!-- 更新通知横条 -->
     <div v-if="updateInfo?.available && !updateDismissed" class="update-banner mb-3">
-      <span class="text-[13px]">新版本 <b>v{{ updateInfo.latest_version }}</b> 可用（当前 v{{ updateInfo.current_version }}）</span>
+      <span class="text-[16px]">新版本 <b>v{{ updateInfo.latest_version }}</b> 可用（当前 v{{ updateInfo.current_version }}）</span>
       <div class="flex gap-1.5 ml-auto">
         <button class="btn btn-primary btn-sm" @click="openUpdatePage">立即下载</button>
         <button class="btn btn-secondary btn-sm" @click="updateDismissed = true">稍后</button>
@@ -493,18 +493,18 @@ onUnmounted(() => {
           <Store :size="22" />
         </div>
         <p class="text-base font-semibold mb-1">没有发现已安装的服务</p>
-        <p class="text-[13px]" style="color: var(--text-muted)">选择一个方式继续：</p>
+        <p class="text-[16px]" style="color: var(--text-muted)">选择一个方式继续：</p>
       </div>
       <div class="grid grid-cols-2 gap-3 max-w-[560px] mx-auto">
         <button class="cta-card" @click="router.push('/store')">
           <Store :size="18" class="mb-2" style="color: #a855f7" />
-          <span class="font-semibold text-[13px] mb-0.5">打开软件商店</span>
-          <span class="text-[11px]" style="color: var(--text-muted)">一键安装 Nginx / MySQL / PHP / Redis</span>
+          <span class="font-semibold text-[16px] mb-0.5">打开软件商店</span>
+          <span class="text-[13px]" style="color: var(--text-muted)">一键安装 Nginx / MySQL / PHP / Redis</span>
         </button>
         <button class="cta-card" @click="router.push('/settings')">
           <Settings2 :size="18" class="mb-2" style="color: var(--color-blue-light)" />
-          <span class="font-semibold text-[13px] mb-0.5">指定 PHPStudy 路径</span>
-          <span class="text-[11px]" style="color: var(--text-muted)">已安装过 PHPStudy？设置里填路径</span>
+          <span class="font-semibold text-[16px] mb-0.5">指定 PHPStudy 路径</span>
+          <span class="text-[13px]" style="color: var(--text-muted)">已安装过 PHPStudy？设置里填路径</span>
         </button>
       </div>
     </div>
@@ -519,13 +519,13 @@ onUnmounted(() => {
           <div class="flex items-start justify-between mb-3">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <div class="text-sm font-semibold">{{ kindLabel(g.kind) }}</div>
+                <div class="text-[16px] font-semibold">{{ kindLabel(g.kind) }}</div>
                 <span v-if="originBadge(g.active)" class="text-[9px] px-1.5 py-px rounded font-semibold leading-none"
                       :style="{ background: `${originBadge(g.active)!.color}22`, color: originBadge(g.active)!.color }">{{ originBadge(g.active)!.text }}</span>
               </div>
               <!-- 单版本：静态显示；多版本：下拉（纯选择，不触发 IPC） -->
               <template v-if="g.all.length === 1">
-                <div class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted)">{{ g.active.version }}</div>
+                <div class="text-[13px] font-mono mt-0.5" style="color: var(--text-muted)">{{ g.active.version }}</div>
               </template>
               <template v-else>
                 <SelectMenu
@@ -544,7 +544,7 @@ onUnmounted(() => {
 
           <!-- Status + Actions (one row) -->
           <div class="flex items-center justify-between">
-            <div class="text-[13px] transition-colors"
+            <div class="text-[16px] transition-colors"
                  :style="{ color: g.running && g.running.id === g.active.id ? 'var(--color-success-light)' : 'var(--text-muted)' }">
               <template v-if="isBusy(g.active.id)">操作中...</template>
               <template v-else-if="!g.running">已停止</template>
@@ -570,8 +570,8 @@ onUnmounted(() => {
       <!-- PHP engine combined card -->
       <div v-if="phpServices.length" class="card mb-4">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-sm font-semibold">PHP 引擎</div>
-          <span class="text-[12px]" style="color: var(--text-muted)">
+          <div class="text-[16px] font-semibold">PHP 引擎</div>
+          <span class="text-[13px]" style="color: var(--text-muted)">
             <span style="color: var(--color-success-light)" class="font-semibold">{{ phpRunning }}</span>/{{ phpServices.length }} 运行中
           </span>
         </div>
@@ -603,26 +603,26 @@ onUnmounted(() => {
       <!-- Recent Activity Log (compact) -->
       <div class="rounded-lg px-3 py-2" style="background: var(--bg-secondary); box-shadow: var(--shadow-card)">
         <div class="flex items-center justify-between mb-1.5">
-          <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--text-muted)">活动日志</div>
-          <button class="text-[11px] flex items-center gap-0.5 hover:opacity-80 transition-opacity cursor-pointer"
+          <div class="text-[13px] font-semibold uppercase tracking-wider" style="color: var(--text-muted)">活动日志</div>
+          <button class="text-[13px] flex items-center gap-0.5 hover:opacity-80 transition-opacity cursor-pointer"
                   style="color: var(--color-blue-light); background: transparent; border: none"
                   @click="logDrawerOpen = true">
             查看全部 <ChevronRight :size="11" />
           </button>
         </div>
-        <div v-if="recentLogs.length === 0" class="text-[12px] py-2 text-center" style="color: var(--text-muted)">暂无活动</div>
+        <div v-if="recentLogs.length === 0" class="text-[13px] py-2 text-center" style="color: var(--text-muted)">暂无活动</div>
         <div v-else class="flex flex-col">
           <div v-for="log in recentLogs.slice(0, 5)" :key="log.id"
-               class="flex items-center gap-2 px-1 py-0.5 rounded text-[12px]">
+               class="flex items-center gap-2 px-1 py-0.5 rounded text-[13px]">
             <component :is="levelIconMap[log.level]" :size="11" :style="{ color: levelColor(log.level) }" class="shrink-0" />
-            <span class="font-mono text-[10px] shrink-0" style="color: var(--text-muted)">{{ log.timestamp.slice(11, 19) }}</span>
+            <span class="font-mono text-[13px] shrink-0" style="color: var(--text-muted)">{{ log.timestamp.slice(11, 19) }}</span>
             <span class="truncate" style="color: var(--text-secondary)">{{ log.message }}</span>
           </div>
         </div>
       </div>
 
       <!-- 应用自身状态条 -->
-      <div v-if="appStats" class="flex items-center gap-3 mt-2 text-[11px]" style="color: var(--text-muted)">
+      <div v-if="appStats" class="flex items-center gap-3 mt-2 text-[13px]" style="color: var(--text-muted)">
         <span>{{ APP_NAME }} · PID {{ appStats.pid }}</span>
         <span v-if="appStats.memory_mb != null">· 内存 {{ appStats.memory_mb }} MB</span>
         <span>· 运行 {{ fmtUptime(localUptime) }}</span>
@@ -637,6 +637,8 @@ onUnmounted(() => {
 <style scoped>
 .svc-card {
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 16px;
@@ -646,9 +648,6 @@ onUnmounted(() => {
 .svc-card:hover {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
   border-color: var(--border-color-hover, var(--border-color));
-}
-.svc-card.is-running {
-  border-color: rgba(63, 185, 80, 0.25);
 }
 
 /* Service toggle switch */
@@ -710,18 +709,16 @@ onUnmounted(() => {
 .php-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: 6px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  font-size: 13px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  border: 1px solid transparent;
   transition: all 0.2s;
 }
 .php-chip.is-running {
   background: rgba(74, 222, 128, 0.08);
-  border-color: rgba(74, 222, 128, 0.25);
   color: var(--color-success-light);
 }
 
@@ -758,7 +755,7 @@ onUnmounted(() => {
   padding: 1px 4px;
   background: var(--bg-tertiary);
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .cta-card {
@@ -770,6 +767,8 @@ onUnmounted(() => {
   padding: 18px 14px;
   border-radius: 10px;
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   border: 1px solid var(--border-color);
   cursor: pointer;
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
@@ -789,10 +788,12 @@ onUnmounted(() => {
 .env-summary {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 8px 14px;
-  border-radius: 8px;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
   background: var(--bg-secondary);
+  backdrop-filter: var(--bg-glass-blur);
+  -webkit-backdrop-filter: var(--bg-glass-blur);
   box-shadow: var(--shadow-card);
   cursor: pointer;
   color: var(--text-secondary);
@@ -802,14 +803,14 @@ onUnmounted(() => {
   background: var(--bg-hover);
 }
 .env-summary-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
 }
 .env-summary-item {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 .env-summary-item b {

@@ -1,8 +1,9 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, watch, onMounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "../composables/useToast";
+import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
 import GlobalEnv from "./GlobalEnv.vue";
 
@@ -386,7 +387,7 @@ onMounted(() => {
       </div>
       <div class="cfg-section">安全</div>
       <div class="cfg-grid">
-        <div class="fg full"><label>访问密码 <span class="k">requirepass</span> <span class="text-xs text-content-muted font-normal">留空表示无密码</span></label><input class="input" v-model="redis.requirepass" placeholder="留空则不设密码" /></div>
+        <div class="fg full"><label>访问密码 <span class="k">requirepass</span> <span class="text-[13px] text-content-muted font-normal">留空表示无密码</span></label><input class="input" v-model="redis.requirepass" placeholder="留空则不设密码" /></div>
       </div>
       <div class="cfg-section">日志</div>
       <div class="cfg-grid">
@@ -403,7 +404,7 @@ onMounted(() => {
         <div class="flex gap-1 shrink-0">
           <button
             v-for="st in [{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'}]" :key="st.k"
-            class="px-4 py-1.5 rounded-md text-[13px] cursor-pointer transition-all border"
+            class="px-4 py-1.5 rounded-md text-[16px] cursor-pointer transition-all border"
             :class="phpSubTab === st.k ? 'bg-accent-blue text-white border-accent-blue' : 'bg-surface-primary text-content-muted border-border hover:text-content-secondary'"
             @click="phpSubTab = st.k as any"
           >{{ st.l }}</button>
@@ -412,10 +413,10 @@ onMounted(() => {
 
       <!-- Extensions -->
       <div v-if="phpSubTab === 'extensions'">
-        <div class="py-2.5 text-[13px] text-content-muted border-b border-border mb-1.5">切换开关启用/禁用扩展，修改后需重启 PHP 生效</div>
+        <div class="py-2.5 text-[16px] text-content-muted border-b border-border mb-1.5">切换开关启用/禁用扩展，修改后需重启 PHP 生效</div>
         <div v-for="ext in phpExts" :key="ext.file_name" class="flex items-center gap-3 py-2.5 border-b border-border last:border-b-0 hover:bg-surface-hover -mx-2 px-2 rounded transition-colors">
           <label class="toggle-wrap"><input type="checkbox" :checked="ext.enabled" :disabled="busy" @change="toggleExt(ext)" /><span class="toggle-slider"></span></label>
-          <span class="text-sm">{{ ext.name }}</span>
+          <span class="text-[16px]">{{ ext.name }}</span>
           <span v-if="ext.is_zend" class="text-2xs px-2 py-0.5 rounded bg-[#3730a3] text-[#c7d2fe]">Zend</span>
         </div>
       </div>
@@ -431,24 +432,24 @@ onMounted(() => {
           <div class="fg"><label>输入超时(秒) <span class="k">max_input_time</span></label><input class="input" type="number" v-model.number="phpIni.max_input_time" /></div>
           <div class="fg"><label>时区 <span class="k">date.timezone</span></label><input class="input" v-model="phpIni.date_timezone" /></div>
           <div class="fg"><label>错误报告级别 <span class="k">error_reporting</span></label><input class="input" v-model="phpIni.error_reporting" /></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">显示错误 <span class="k">display_errors</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.display_errors" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">短标签 <span class="k">short_open_tag</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.short_open_tag" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">文件上传 <span class="k">file_uploads</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.file_uploads" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">显示错误 <span class="k">display_errors</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.display_errors" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">短标签 <span class="k">short_open_tag</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.short_open_tag" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">文件上传 <span class="k">file_uploads</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.file_uploads" /><span class="toggle-slider"></span></label></div>
         </div>
         <div class="cfg-section">安全</div>
         <div class="cfg-grid">
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">允许远程文件 <span class="k">allow_url_fopen</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.allow_url_fopen" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">允许远程包含 <span class="k">allow_url_include</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.allow_url_include" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">暴露 PHP 版本 <span class="k">expose_php</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.expose_php" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">允许远程文件 <span class="k">allow_url_fopen</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.allow_url_fopen" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">允许远程包含 <span class="k">allow_url_include</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.allow_url_include" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">暴露 PHP 版本 <span class="k">expose_php</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.expose_php" /><span class="toggle-slider"></span></label></div>
           <div class="fg full"><label>禁用函数 <span class="k">disable_functions</span></label><input class="input" v-model="phpIni.disable_functions" placeholder="exec,passthru,shell_exec,system" /></div>
           <div class="fg full"><label>目录限制 <span class="k">open_basedir</span></label><input class="input" v-model="phpIni.open_basedir" placeholder="留空不限制" /></div>
         </div>
         <div class="cfg-section">OPCache 缓存</div>
         <div class="cfg-grid">
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">启用 OPCache <span class="k">opcache.enable</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.opcache_enable" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">启用 OPCache <span class="k">opcache.enable</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.opcache_enable" /><span class="toggle-slider"></span></label></div>
           <div class="fg"><label>内存消耗(MB) <span class="k">opcache.memory_consumption</span></label><input class="input" type="number" v-model.number="phpIni.opcache_memory_consumption" /></div>
           <div class="fg"><label>最大加速文件数 <span class="k">opcache.max_accelerated_files</span></label><input class="input" type="number" v-model.number="phpIni.opcache_max_accelerated_files" /></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">验证时间戳 <span class="k">opcache.validate_timestamps</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.opcache_validate_timestamps" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">验证时间戳 <span class="k">opcache.validate_timestamps</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.opcache_validate_timestamps" /><span class="toggle-slider"></span></label></div>
           <div class="fg"><label>重验证间隔(秒) <span class="k">opcache.revalidate_freq</span></label><input class="input" type="number" v-model.number="phpIni.opcache_revalidate_freq" /></div>
         </div>
         <div class="cfg-section">输出与编码</div>
@@ -466,10 +467,10 @@ onMounted(() => {
           <div class="fg"><label>GC 最大存活时间(秒) <span class="k">session.gc_maxlifetime</span></label><input class="input" type="number" v-model.number="phpIni.session_gc_maxlifetime" /></div>
           <div class="fg"><label>Cookie 有效期(秒) <span class="k">session.cookie_lifetime</span></label><input class="input" type="number" v-model.number="phpIni.session_cookie_lifetime" /></div>
           <div class="fg"><label>Cookie SameSite <span class="k">session.cookie_samesite</span></label><SelectMenu v-model="phpIni.session_cookie_samesite" :options="phpSameSiteOptions" full-width trigger-class="input" /></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">使用 Cookie <span class="k">session.use_cookies</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_cookies" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">仅使用 Cookie <span class="k">session.use_only_cookies</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_only_cookies" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">严格模式 <span class="k">session.use_strict_mode</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_strict_mode" /><span class="toggle-slider"></span></label></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">Cookie HttpOnly <span class="k">session.cookie_httponly</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_cookie_httponly" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">使用 Cookie <span class="k">session.use_cookies</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_cookies" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">仅使用 Cookie <span class="k">session.use_only_cookies</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_only_cookies" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">严格模式 <span class="k">session.use_strict_mode</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_strict_mode" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">Cookie HttpOnly <span class="k">session.cookie_httponly</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_cookie_httponly" /><span class="toggle-slider"></span></label></div>
         </div>
       </div>
     </div>
@@ -478,14 +479,16 @@ onMounted(() => {
     <!-- ==================== Hosts ==================== -->
     <div v-if="activeTab === 'hosts'" class="tab-card p-6">
       <div class="flex items-center justify-between mb-2">
-        <div class="text-sm font-medium text-content-secondary">系统 Hosts 文件</div>
+        <div class="text-[16px] font-medium text-content-secondary">系统 Hosts 文件</div>
         <button class="btn btn-secondary btn-sm" @click="openHostsExternally">系统编辑器打开</button>
       </div>
-      <div class="text-xs text-content-muted mb-3 break-all">{{ hostsPath || '加载中...' }}</div>
+      <div class="text-[13px] text-content-muted mb-3 break-all">{{ hostsPath || '加载中...' }}</div>
       <textarea
-        class="input font-mono text-xs leading-5 w-full min-h-[420px]"
+        class="input font-mono text-[13px] leading-5 w-full min-h-[420px]"
         style="resize: vertical"
         v-model="hostsText"
+        spellcheck="false"
+        @keydown="onTextareaTab"
         placeholder="# 在这里编辑 hosts 内容"
       ></textarea>
     </div>
@@ -517,7 +520,7 @@ onMounted(() => {
           <div class="text-base font-semibold">错误日志</div>
           <button class="btn btn-secondary btn-sm" @click="showLog = false">关闭</button>
         </div>
-        <pre class="input font-mono text-xs whitespace-pre-wrap overflow-y-auto" style="max-height: 60vh; min-height: 200px">{{ logContent || '(日志为空)' }}</pre>
+        <pre class="input font-mono text-[13px] whitespace-pre-wrap overflow-y-auto" style="max-height: 60vh; min-height: 200px">{{ logContent || '(日志为空)' }}</pre>
       </div>
     </div>
   </div>

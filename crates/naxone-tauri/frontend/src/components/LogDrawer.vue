@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { X, Trash2, FolderOpen, RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, Copy } from "lucide-vue-next";
@@ -170,8 +170,8 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
            style="width: 480px; background: var(--bg-secondary); border-left: 1px solid var(--border-color)">
         <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--border-color)">
           <div class="flex items-center gap-2">
-            <span class="text-sm font-semibold">活动日志</span>
-            <span class="text-xs" style="color: var(--text-muted)">{{ logs.length }} 条</span>
+            <span class="text-[16px] font-semibold">活动日志</span>
+            <span class="text-[13px]" style="color: var(--text-muted)">{{ logs.length }} 条</span>
           </div>
           <button class="p-1 rounded hover:bg-[var(--bg-hover)] transition-colors" @click="emit('close')">
             <X :size="16" />
@@ -187,7 +187,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
         </div>
 
         <div class="flex-1 overflow-y-auto">
-          <div v-if="logs.length === 0" class="text-center py-12 text-[13px]" style="color: var(--text-muted)">暂无日志</div>
+          <div v-if="logs.length === 0" class="text-center py-12 text-[16px]" style="color: var(--text-muted)">暂无日志</div>
           <div v-for="log in logs" :key="log.id"
                class="px-4 py-2 border-b cursor-pointer transition-colors hover:bg-[var(--bg-hover)] group"
                :style="{ borderColor: 'var(--border-color)' }"
@@ -196,10 +196,10 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
               <component :is="levelIcon[log.level]" :size="14" :style="{ color: levelColor(log.level), marginTop: '2px' }" class="shrink-0" />
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline gap-2">
-                  <span class="text-[11px] font-mono" style="color: var(--text-muted)">{{ log.timestamp.slice(11, 19) }}</span>
-                  <span class="text-[10px] px-1.5 py-0.5 rounded" style="background: var(--bg-tertiary); color: var(--text-muted)">{{ categoryLabel(log.category) }}</span>
+                  <span class="text-[13px] font-mono" style="color: var(--text-muted)">{{ log.timestamp.slice(11, 19) }}</span>
+                  <span class="text-[13px] px-1.5 py-0.5 rounded" style="background: var(--bg-tertiary); color: var(--text-muted)">{{ categoryLabel(log.category) }}</span>
                 </div>
-                <div class="text-[13px] mt-0.5 flex items-start justify-between gap-2">
+                <div class="text-[16px] mt-0.5 flex items-start justify-between gap-2">
                   <span style="color: var(--text-primary)">{{ log.message }}</span>
                   <button class="shrink-0 p-1 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
                           style="color: var(--text-muted); background: transparent; border: none; cursor: pointer"
@@ -208,7 +208,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
                     <Copy :size="12" />
                   </button>
                 </div>
-                <pre v-if="expandedIds.has(log.id) && log.details" class="text-[11px] mt-2 p-2 rounded whitespace-pre-wrap font-mono"
+                <pre v-if="expandedIds.has(log.id) && log.details" class="text-[13px] mt-2 p-2 rounded whitespace-pre-wrap font-mono"
                      style="background: var(--bg-primary); color: var(--text-secondary); max-height: 200px; overflow-y: auto">{{ log.details }}</pre>
               </div>
             </div>

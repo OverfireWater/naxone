@@ -1,8 +1,9 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "../composables/useToast";
+import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
 import { Pencil, ExternalLink, FolderOpen, Trash2 } from "lucide-vue-next";
 
@@ -314,14 +315,14 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           <div class="fg"><label>PHP 版本</label><SelectMenu v-model="form.php_version" :options="phpVersionOptions" full-width trigger-class="input" /></div>
           <div class="fg"><label>默认首页</label><input class="input" v-model="form.index_files" placeholder="index.php index.html" /></div>
           <div class="fg"><label>到期日期 <span style="color:var(--text-muted);font-weight:400">留空永不过期</span></label><input class="input" type="date" v-model="form.expires_at" /></div>
-          <div class="fg-toggle"><span class="text-[12px] font-medium" style="color:var(--text-secondary)">同步 Hosts</span><label class="toggle-wrap"><input type="checkbox" v-model="form.sync_hosts" /><span class="toggle-slider"></span></label></div>
+          <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">同步 Hosts</span><label class="toggle-wrap"><input type="checkbox" v-model="form.sync_hosts" /><span class="toggle-slider"></span></label></div>
         </div>
 
         <!-- Tab: 伪静态 -->
         <div v-show="modalTab === 'rewrite'" class="grid grid-cols-2 gap-3">
           <div class="fg"><label>伪静态预设</label><SelectMenu :model-value="rewritePreset" :options="rewritePresetOptions" full-width trigger-class="input" @update:modelValue="onRewritePresetChange(String($event))" /></div>
           <div class="fg"><label>目录浏览</label><SelectMenu v-model="form.autoindex" :options="boolOptions" full-width trigger-class="input" /></div>
-          <div class="fg full"><label>伪静态规则 <span style="color:var(--text-muted);font-weight:400">选择预设自动填充，可手动修改</span></label><textarea class="input resize-y font-mono text-xs min-h-[180px]" v-model="form.rewrite_rule" rows="5" placeholder="try_files $uri $uri/ /index.php?$query_string;"></textarea></div>
+          <div class="fg full"><label>伪静态规则 <span style="color:var(--text-muted);font-weight:400">选择预设自动填充，可手动修改</span></label><textarea class="input resize-y font-mono text-[13px] min-h-[180px]" v-model="form.rewrite_rule" rows="5" spellcheck="false" @keydown="onTextareaTab" placeholder="try_files $uri $uri/ /index.php?$query_string;"></textarea></div>
         </div>
 
         <!-- Tab: SSL 与高级 -->
@@ -333,7 +334,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
                 {{ sslBusy ? '生成中...' : '🔒 一键生成自签证书' }}
               </button>
             </div>
-            <div class="text-[11px]" style="color: var(--text-muted)">
+            <div class="text-[13px]" style="color: var(--text-muted)">
               本地开发 HTTPS 用。浏览器首次访问会提示"不安全"，手动继续即可；或用 mkcert 把本地 CA 装进系统信任。
             </div>
           </div>
@@ -341,7 +342,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           <div class="fg"><label>密钥路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_key" placeholder="*.key" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_key')">浏览</button></div></div>
           <div class="fg"><label>强制 HTTPS</label><SelectMenu v-model="form.force_https" :options="boolOptions" full-width trigger-class="input" /></div>
           <div class="fg"><label>日志路径</label><input class="input" v-model="form.access_log" placeholder="留空使用默认" /></div>
-          <div class="fg full"><label>自定义 Nginx 指令</label><textarea class="input resize-y font-mono text-xs min-h-[140px]" v-model="form.custom_directives" rows="4" placeholder="proxy_pass http://127.0.0.1:3000;"></textarea></div>
+          <div class="fg full"><label>自定义 Nginx 指令</label><textarea class="input resize-y font-mono text-[13px] min-h-[140px]" v-model="form.custom_directives" rows="4" spellcheck="false" @keydown="onTextareaTab" placeholder="proxy_pass http://127.0.0.1:3000;"></textarea></div>
         </div>
       </div>
     </div>
@@ -349,18 +350,18 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
     <!-- ==================== List ==================== -->
     <div v-if="filteredVhosts.length === 0 && !showForm" class="text-center py-16 text-content-secondary">
       <p>暂无网站</p>
-      <p class="mt-2 text-sm text-content-muted">点击上方按钮创建第一个站点</p>
+      <p class="mt-2 text-[16px] text-content-muted">点击上方按钮创建第一个站点</p>
     </div>
 
     <template v-for="g in groupedVhosts" :key="g.key">
-    <div class="flex items-center gap-2 px-1 mt-3 mb-1.5 text-[11px] font-semibold uppercase tracking-widest"
+    <div class="flex items-center gap-2 px-1 mt-3 mb-1.5 text-[13px] font-semibold uppercase tracking-widest"
          style="color: var(--text-muted)">
       <span>{{ g.label }}</span>
-      <span class="px-1.5 py-px rounded text-[10px] font-mono" style="background: var(--bg-tertiary)">{{ g.items.length }}</span>
+      <span class="px-1.5 py-px rounded text-[13px] font-mono" style="background: var(--bg-tertiary)">{{ g.items.length }}</span>
     </div>
     <div class="list-card mb-2">
       <!-- Header -->
-      <div class="flex items-center px-5 py-2.5 text-[11px] font-semibold uppercase tracking-widest"
+      <div class="flex items-center px-5 py-2.5 text-[13px] font-semibold uppercase tracking-widest"
            style="color: var(--text-muted)">
         <span class="w-[200px]">域名</span>
         <span class="w-14">端口</span>
@@ -374,24 +375,24 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
       <div v-for="vh in g.items" :key="vh.id" class="group list-row gap-0">
         <div class="w-[200px] shrink-0 min-w-0">
           <div class="flex items-center gap-1.5">
-            <span class="text-sm font-medium truncate">{{ vh.server_name }}</span>
-            <span v-if="vh.has_ssl" class="text-[10px] px-1.5 py-px rounded font-medium shrink-0"
+            <span class="text-[16px] font-medium truncate">{{ vh.server_name }}</span>
+            <span v-if="vh.has_ssl" class="text-[13px] px-1.5 py-px rounded font-medium shrink-0"
                   style="background: rgba(34,197,94,0.15); color: var(--color-success-light)">SSL</span>
-            <span v-if="sourceBadge(vh)" class="text-[10px] px-1.5 py-px rounded font-medium shrink-0"
+            <span v-if="sourceBadge(vh)" class="text-[13px] px-1.5 py-px rounded font-medium shrink-0"
                   :style="{ background: `${sourceBadge(vh)!.color}22`, color: sourceBadge(vh)!.color }">{{ sourceBadge(vh)!.text }}</span>
           </div>
-          <div v-if="vh.aliases.length > 0" class="text-[11px] mt-0.5 truncate" style="color: var(--text-muted)">{{ vh.aliases.join(", ") }}</div>
+          <div v-if="vh.aliases.length > 0" class="text-[13px] mt-0.5 truncate" style="color: var(--text-muted)">{{ vh.aliases.join(", ") }}</div>
         </div>
-        <div class="w-14 shrink-0 text-[13px] font-mono" style="color: var(--text-muted)">{{ vh.listen_port }}</div>
-        <div class="flex-1 min-w-0 text-[13px] truncate pr-3" style="color: var(--text-secondary)" :title="vh.document_root">{{ vh.document_root }}</div>
+        <div class="w-14 shrink-0 text-[16px] font-mono" style="color: var(--text-muted)">{{ vh.listen_port }}</div>
+        <div class="flex-1 min-w-0 text-[16px] truncate pr-3" style="color: var(--text-secondary)" :title="vh.document_root">{{ vh.document_root }}</div>
         <div class="w-20 shrink-0 text-center">
           <template v-if="phpDisplay(vh.php_version)">
-            <span class="text-[12px] font-mono" style="color: var(--text-secondary)">{{ phpDisplay(vh.php_version)!.v }}</span>
-            <span v-if="phpDisplay(vh.php_version)!.variant" class="text-[10px] ml-0.5" style="color: var(--text-muted)">{{ phpDisplay(vh.php_version)!.variant }}</span>
+            <span class="text-[13px] font-mono" style="color: var(--text-secondary)">{{ phpDisplay(vh.php_version)!.v }}</span>
+            <span v-if="phpDisplay(vh.php_version)!.variant" class="text-[13px] ml-0.5" style="color: var(--text-muted)">{{ phpDisplay(vh.php_version)!.variant }}</span>
           </template>
-          <span v-else class="text-[12px]" style="color: var(--text-muted)">-</span>
+          <span v-else class="text-[13px]" style="color: var(--text-muted)">-</span>
         </div>
-        <div class="w-20 shrink-0 text-center text-[12px]" :style="{ color: isExpired(vh) ? 'var(--color-danger)' : 'var(--text-muted)' }">{{ vh.expires_at ? (isExpired(vh) ? '已过期' : formatDate(vh.expires_at)) : '永久' }}</div>
+        <div class="w-20 shrink-0 text-center text-[13px]" :style="{ color: isExpired(vh) ? 'var(--color-danger)' : 'var(--text-muted)' }">{{ vh.expires_at ? (isExpired(vh) ? '已过期' : formatDate(vh.expires_at)) : '永久' }}</div>
         <div class="w-14 shrink-0 flex justify-center">
           <label class="toggle-wrap" @click.prevent="toggleVhost(vh)">
             <input type="checkbox" :checked="vh.enabled" />

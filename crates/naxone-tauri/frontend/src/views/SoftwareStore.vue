@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw } from "lucide-vue-next";
@@ -107,7 +107,7 @@ onMounted(() => {
   <div class="max-w-[1100px]">
     <!-- Header -->
     <div class="flex items-center justify-between mb-3">
-      <p class="text-[12px]" style="color: var(--text-muted)">选择软件和版本，一键下载安装到本应用</p>
+      <p class="text-[13px]" style="color: var(--text-muted)">选择软件和版本，一键下载安装到本应用</p>
       <button class="btn btn-secondary btn-sm flex items-center gap-1.5"
               @click="refreshIndex" :disabled="refreshing"
               :title="refreshing ? '刷新中...' : '强制从官方源拉取最新版本列表（默认缓存 6 小时）'">
@@ -149,7 +149,7 @@ onMounted(() => {
   margin-left: 6px;
   padding: 0 6px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   background: var(--bg-tertiary);
   color: var(--text-muted);
