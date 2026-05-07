@@ -168,37 +168,34 @@ def publish_github(tag: str, version: str, installer: Path, notes_path: Path,
     if latest_tmp is not None:
         assets.append(str(latest_tmp))
 
-    try:
-        # 是否已存在
-        exists = subprocess.run(
-            [gh, "release", "view", tag, "--repo", GH_REPO],
-            capture_output=True, text=True
-        ).returncode == 0
+    # 不在 finally 清理 latest.json：失败重试要用，且 latest.json 在产物目录
+    # 跟 setup.exe 同位置无所谓存留。下次 build 会覆盖。
+    exists = subprocess.run(
+        [gh, "release", "view", tag, "--repo", GH_REPO],
+        capture_output=True, text=True
+    ).returncode == 0
 
-        if exists:
-            subprocess.run(
-                [gh, "release", "edit", tag, "--repo", GH_REPO,
-                 "--title", title, "--notes-file", str(notes_path)],
-                check=True,
-            )
-            subprocess.run(
-                [gh, "release", "upload", tag, *assets,
-                 "--repo", GH_REPO, "--clobber"],
-                check=True,
-            )
-            print(f"GitHub release {tag} 已更新")
-        else:
-            subprocess.run(
-                [gh, "release", "create", tag, *assets,
-                 "--repo", GH_REPO,
-                 "--title", title,
-                 "--notes-file", str(notes_path)],
-                check=True,
-            )
-            print(f"GitHub release {tag} 已创建")
-    finally:
-        if latest_tmp is not None:
-            latest_tmp.unlink(missing_ok=True)
+    if exists:
+        subprocess.run(
+            [gh, "release", "edit", tag, "--repo", GH_REPO,
+             "--title", title, "--notes-file", str(notes_path)],
+            check=True,
+        )
+        subprocess.run(
+            [gh, "release", "upload", tag, *assets,
+             "--repo", GH_REPO, "--clobber"],
+            check=True,
+        )
+        print(f"GitHub release {tag} 已更新")
+    else:
+        subprocess.run(
+            [gh, "release", "create", tag, *assets,
+             "--repo", GH_REPO,
+             "--title", title,
+             "--notes-file", str(notes_path)],
+            check=True,
+        )
+        print(f"GitHub release {tag} 已创建")
 
 
 def build_body(version: str, filename: str, sha256: str, file_size: float) -> str:
@@ -342,7 +339,35 @@ def main() -> int:
         else:
             publish_github(tag, version, installer, notes_path, sig_path, github_latest)
 
+    # 同步 latest.json 到 main 分支根目录（Gitee endpoint 拉这个 raw URL）
+    # Gitee 不支持 /releases/latest/download/X 路径（404），改走 raw/main
+    update_main_latest_json(gitee_latest)
+
     return 0
+
+
+def update_main_latest_json(content: str) -> None:
+    """把 latest.json 写到项目根 + git add commit push（如有改动）。
+    每次发版自动维护，让 Gitee raw/main/latest.json 始终指向最新版。"""
+    target = ROOT / "latest.json"
+    target.write_text(content, encoding="utf-8")
+    try:
+        diff = subprocess.run(["git", "diff", "--quiet", "--", str(target)], cwd=ROOT)
+        if diff.returncode == 0:
+            print("latest.json 无变化，跳过 commit")
+            return
+        subprocess.run(["git", "add", str(target)], cwd=ROOT, check=True)
+        # 从 content 提取 version（避免 f-string 内嵌引号）
+        try:
+            ver = json.loads(content).get("version", "")
+        except Exception:
+            ver = ""
+        msg = "chore: update latest.json" + (f" -> {ver}" if ver else "")
+        subprocess.run(["git", "commit", "-m", msg], cwd=ROOT, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
+        print("latest.json 已 push 到 main 分支")
+    except subprocess.CalledProcessError as e:
+        print(f"WARN: latest.json 同步失败（不影响 Release 发布）: {e}")
 
 
 if __name__ == "__main__":

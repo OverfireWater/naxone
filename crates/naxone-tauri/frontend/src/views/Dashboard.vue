@@ -275,7 +275,23 @@ async function loadAppStats() {
 
 async function checkForUpdates() {
   try {
-    updateInfo.value = await invokeWithTimeout<UpdateInfo>("check_for_updates", undefined, 12000);
+    // 用 plugin-updater 的 check() 走 latest.json 静态文件（避免 Gitee API 403 限速）
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const { getVersion } = await import("@tauri-apps/api/app");
+    const upd = await check();
+    const current = await getVersion();
+    if (upd) {
+      updateInfo.value = {
+        available: true,
+        latest_version: upd.version,
+        current_version: current,
+        release_url: "",
+        release_notes: upd.body ?? "",
+        download_url: null,
+      };
+    } else {
+      updateInfo.value = { available: false, latest_version: current, current_version: current, release_url: "", release_notes: "", download_url: null };
+    }
   } catch (e) {
     const now = Date.now();
     const last = bgErrorAt.get("updates") ?? 0;
