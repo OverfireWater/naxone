@@ -12,7 +12,7 @@
         {
           "version": "1.27.3",
           "url": "https://nginx.org/download/nginx-1.27.3.zip",
-          "sha256": null,
+          "sha256": "c8d851ab2673b986fe82b9bb2e681ef0cc675a25d69381aa00b63a1663510d6e",
           "size_mb": 2,
           "exe_rel": "nginx.exe",
           "variant": "mainline"
@@ -20,7 +20,7 @@
         {
           "version": "1.26.2",
           "url": "https://nginx.org/download/nginx-1.26.2.zip",
-          "sha256": null,
+          "sha256": "942638cc31c836fe429fde22e4c46e497f89d3c2bbce46cd2c8800854fd71409",
           "size_mb": 2,
           "exe_rel": "nginx.exe",
           "variant": "stable"
@@ -28,7 +28,7 @@
         {
           "version": "1.25.3",
           "url": "https://nginx.org/download/nginx-1.25.3.zip",
-          "sha256": null,
+          "sha256": "58df6e5865a922aaa477ac89b79c13739347a37ccc4b3de58de91f1487710cc4",
           "size_mb": 2,
           "exe_rel": "nginx.exe",
           "variant": null
@@ -55,7 +55,7 @@
         {
           "version": "2.4.66",
           "url": "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.66-260223-Win64-VS18.zip",
-          "sha256": null,
+          "sha256": "c7b7d9361862e57c1919ecd07e26e3491c667c16fe53a29d775ebec5a30b0d16",
           "size_mb": 12,
           "exe_rel": "bin/httpd.exe",
           "variant": "Win64 · VS18"
@@ -74,7 +74,7 @@
         {
           "version": "8.0.40",
           "url": "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip",
-          "sha256": null,
+          "sha256": "34c5c0ed035b98079bba2d1b0cd03d74715e339a52877a556741ac88255b6209",
           "size_mb": 225,
           "exe_rel": "bin/mysqld.exe",
           "variant": null
@@ -82,7 +82,7 @@
         {
           "version": "8.0.36",
           "url": "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.36-winx64.zip",
-          "sha256": null,
+          "sha256": "a1bc2ad567eef672be20b591ad25b14f221e60bde3ae3eb235128d91e4166557",
           "size_mb": 225,
           "exe_rel": "bin/mysqld.exe",
           "variant": null
@@ -90,7 +90,7 @@
         {
           "version": "5.7.44",
           "url": "https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.44-winx64.zip",
-          "sha256": null,
+          "sha256": "aed661fe8120254a1dc30f5a4d5de346681922f4847cf025e2d4084eca78e70e",
           "size_mb": 370,
           "exe_rel": "bin/mysqld.exe",
           "variant": "最后版"
@@ -109,7 +109,7 @@
         {
           "version": "8.4.2",
           "url": "https://windows.php.net/downloads/releases/archives/php-8.4.2-nts-Win32-vs17-x64.zip",
-          "sha256": null,
+          "sha256": "8ae6d656518fdb571cdb3b3349237cf7fe62c9f2bfd598edaa9825ce732830e9",
           "size_mb": 30,
           "exe_rel": "php-cgi.exe",
           "variant": "x64-NTS"
@@ -117,7 +117,7 @@
         {
           "version": "8.4.1",
           "url": "https://windows.php.net/downloads/releases/archives/php-8.4.1-nts-Win32-vs17-x64.zip",
-          "sha256": null,
+          "sha256": "b18be6c66ce97d9eca6b1a8c10f3fb379b7b0a1d24533b5ecc52fac7d4df25f7",
           "size_mb": 30,
           "exe_rel": "php-cgi.exe",
           "variant": "x64-NTS"
@@ -133,7 +133,7 @@
         {
           "version": "8.3.2",
           "url": "https://windows.php.net/downloads/releases/archives/php-8.3.2-nts-Win32-vs16-x64.zip",
-          "sha256": null,
+          "sha256": "674ad1fdc50d07a3324a4916d8e31b5dec9331d55b51ee85d09a4d3b03bacc01",
           "size_mb": 27,
           "exe_rel": "php-cgi.exe",
           "variant": "x64-NTS"
@@ -141,7 +141,7 @@
         {
           "version": "8.2.26",
           "url": "https://windows.php.net/downloads/releases/archives/php-8.2.26-nts-Win32-vs16-x64.zip",
-          "sha256": null,
+          "sha256": "216a28025c87825e85add4d33ab0bc656b51cd1a7a66004be82fe710c649d683",
           "size_mb": 27,
           "exe_rel": "php-cgi.exe",
           "variant": "x64-NTS"
@@ -173,7 +173,7 @@
         {
           "version": "8.0.30",
           "url": "https://windows.php.net/downloads/releases/archives/php-8.0.30-nts-Win32-vs16-x64.zip",
-          "sha256": null,
+          "sha256": "dfb70498ffa2c617f2f655a155564697e3c9cca41709938fd1a5997d1d5b0785",
           "size_mb": 25,
           "exe_rel": "php-cgi.exe",
           "variant": "x64-NTS · EOL"
@@ -181,7 +181,7 @@
         {
           "version": "7.4.33",
           "url": "https://windows.php.net/downloads/releases/archives/php-7.4.33-nts-Win32-vc15-x64.zip",
-          "sha256": null,
+          "sha256": "14ae3250d4447c8ccfc4c45a70d90adfbcd61e728d85f0be56a7ddf8f9c8aace",
           "size_mb": 24,
           "exe_rel": "php-cgi.exe",
           "variant": "x64-NTS · EOL"

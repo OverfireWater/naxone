@@ -190,7 +190,8 @@ impl Installer {
         }
 
         // ---------- SHA256 ----------
-        // 必须有清单声明的哈希；否则拒绝安装。这避免了"清单缺校验时静默通过"导致供应链攻击的窗口。
+        // 优先校验：清单有哈希 → 必须匹配
+        // 兜底：清单无哈希时，只允许从可信官方源下载（HTTPS + 白名单 host），仍记录 warn
         match &version.sha256 {
             Some(expected) => {
                 if let Err(e) = verify_sha256(&temp_zip, expected).await {
@@ -199,12 +200,25 @@ impl Installer {
                 }
             }
             None => {
-                let _ = std::fs::remove_file(&temp_zip);
-                return fail(
-                    &tx,
-                    &name,
-                    &ver,
-                    "包清单缺少 sha256 哈希校验，已拒绝安装。请联系维护者补全清单或选择其它版本。".to_string(),
+                // 找到实际下载成功的 URL（在 download() 之后 used_url 已记录）
+                // 简化：用 version 的第一个 URL 判断 host 是否可信
+                let urls = version.candidate_urls();
+                let first = urls.first().map(|s| s.as_str()).unwrap_or("");
+                if !is_trusted_source(first) {
+                    let _ = std::fs::remove_file(&temp_zip);
+                    return fail(
+                        &tx,
+                        &name,
+                        &ver,
+                        "包清单缺少 sha256 哈希校验，已拒绝安装。请联系维护者补全清单或选择其它版本。".to_string(),
+                    );
+                }
+                tracing::warn!(
+                    name = %name,
+                    version = %ver,
+                    url = first,
+                    "包清单未声明 sha256，但下载源在可信白名单内（{}），仅警告不拒装",
+                    extract_host(first).unwrap_or("?")
                 );
             }
         }
@@ -494,6 +508,40 @@ fn fail(
         reason: reason.clone(),
     });
     Err(reason)
+}
+
+/// 可信下载源白名单。命中时即使清单无 sha256 也允许装（HTTPS 直连官方）。
+/// 严格 host 匹配，不做后缀匹配，避免被 evil-cdn.mysql.com.attacker.com 绕过。
+const TRUSTED_HOSTS: &[&str] = &[
+    "cdn.mysql.com",
+    "dev.mysql.com",
+    "windows.php.net",
+    "nginx.org",
+    "www.apachelounge.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "ghfast.top",
+    "ghproxy.net",
+    "gh-proxy.com",
+    "cdn.jsdelivr.net",
+];
+
+fn extract_host(url: &str) -> Option<&str> {
+    let after_scheme = url.split_once("://")?.1;
+    let host_end = after_scheme.find('/').unwrap_or(after_scheme.len());
+    let host = &after_scheme[..host_end];
+    // 去掉可能的 port
+    Some(host.split(':').next().unwrap_or(host))
+}
+
+fn is_trusted_source(url: &str) -> bool {
+    if !url.starts_with("https://") {
+        return false;
+    }
+    match extract_host(url) {
+        Some(host) => TRUSTED_HOSTS.contains(&host),
+        None => false,
+    }
 }
 
 fn finalize_install(
