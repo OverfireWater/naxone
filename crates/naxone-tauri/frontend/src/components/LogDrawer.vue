@@ -196,8 +196,8 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
               <component :is="levelIcon[log.level]" :size="14" :style="{ color: levelColor(log.level), marginTop: '2px' }" class="shrink-0" />
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline gap-2">
-                  <span class="text-[13px] font-mono" style="color: var(--text-muted)">{{ log.timestamp.slice(11, 19) }}</span>
-                  <span class="text-[13px] px-1.5 py-0.5 rounded" style="background: var(--bg-tertiary); color: var(--text-muted)">{{ categoryLabel(log.category) }}</span>
+                  <span class="text-[13px] font-mono" style="color: var(--text-secondary)">{{ log.timestamp.slice(11, 19) }}</span>
+                  <span class="text-[13px] px-2 py-0.5 rounded font-medium" style="background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color)">{{ categoryLabel(log.category) }}</span>
                 </div>
                 <div class="text-[16px] mt-0.5 flex items-start justify-between gap-2">
                   <span style="color: var(--text-primary)">{{ log.message }}</span>
@@ -208,8 +208,8 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
                     <Copy :size="12" />
                   </button>
                 </div>
-                <pre v-if="expandedIds.has(log.id) && log.details" class="text-[13px] mt-2 p-2 rounded whitespace-pre-wrap font-mono"
-                     style="background: var(--bg-primary); color: var(--text-secondary); max-height: 200px; overflow-y: auto">{{ log.details }}</pre>
+                <pre v-if="expandedIds.has(log.id) && log.details" class="text-[13px] mt-2 p-2.5 rounded whitespace-pre-wrap font-mono"
+                     style="background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-color); max-height: 200px; overflow-y: auto">{{ log.details }}</pre>
               </div>
             </div>
           </div>

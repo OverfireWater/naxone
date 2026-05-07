@@ -107,11 +107,15 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigDto, String>
 pub async fn save_config(dto: ConfigDto, state: State<'_, AppState>) -> Result<(), String> {
     let mut config = state.config.write().await;
 
-    config.general.phpstudy_path = if dto.phpstudy_path.is_empty() {
+    // 记录旧的 phpstudy_path，保存后若变化则自动 rescan，避免 services 缓存指向旧路径
+    let old_phpstudy = config.general.phpstudy_path.clone();
+    let new_phpstudy = if dto.phpstudy_path.is_empty() {
         None
     } else {
         Some(std::path::PathBuf::from(&dto.phpstudy_path))
     };
+
+    config.general.phpstudy_path = new_phpstudy.clone();
     config.general.www_root = std::path::PathBuf::from(&dto.www_root);
     config.web_server.active = dto.active_web_server;
     config.general.auto_start = dto.auto_start;
@@ -139,6 +143,13 @@ pub async fn save_config(dto: ConfigDto, state: State<'_, AppState>) -> Result<(
         None,
     )
     .await;
+
+    // PHPStudy 路径变了 → 自动重扫一次 services + vhosts，让缓存跟上新路径。
+    // 否则 vhost 编辑/删除会因 resolve_dirs 找旧路径失败报错。
+    if old_phpstudy != new_phpstudy {
+        let _ = rescan_services(state).await;
+    }
+
     Ok(())
 }
 

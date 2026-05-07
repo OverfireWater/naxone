@@ -74,7 +74,7 @@
         {
           "version": "8.0.40",
           "url": "https://cdn.mysql.com/archives/mysql-8.0/mysql-8.0.40-winx64.zip",
-          "sha256": "34c5c0ed035b98079bba2d1b0cd03d74715e339a52877a556741ac88255b6209",
+          "sha256": "7c3f1c09ba1b4a82df32a8d889533fceaf2692383e386a04ee708a12de66f129",
           "size_mb": 225,
           "exe_rel": "bin/mysqld.exe",
           "variant": null

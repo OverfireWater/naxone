@@ -18,6 +18,8 @@ tracing-subscriber = { workspace = true }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 chrono = "0.4.44"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

@@ -36,6 +36,11 @@ logs/
 .env
 release.env.local
 
+# Tauri updater 签名私钥（绝不可进 git；公钥嵌在 tauri.conf.json，.pub 文件本地保留即可）
+naxone-updater.key
+*.key
+*.key.pub
+
 # Tauri 构建产物会放在 target/ 下，上面已忽略。
 # 但独立的 bundle 目录也防一手：
 /bundle/

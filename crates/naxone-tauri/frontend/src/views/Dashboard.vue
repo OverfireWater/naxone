@@ -286,9 +286,50 @@ async function checkForUpdates() {
   }
 }
 
-function openUpdatePage() {
-  const url = updateInfo.value?.download_url || updateInfo.value?.release_url;
-  if (url) invokeWithTimeout("open_in_browser", { url }).catch((e) => showError(`打开下载页失败: ${e}`));
+// OTA 自更新（Tauri plugin-updater）
+const updateBusy = ref(false);
+const updateProgress = ref(0); // 0-100
+const updateProgressLabel = ref("");
+
+async function performAutoUpdate() {
+  if (updateBusy.value) return;
+  updateBusy.value = true;
+  updateProgress.value = 0;
+  updateProgressLabel.value = "检查更新...";
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const upd = await check();
+    if (!upd) {
+      toast.info("已是最新版本");
+      return;
+    }
+    let downloaded = 0;
+    let total = 0;
+    await upd.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        total = event.data.contentLength ?? 0;
+        updateProgressLabel.value = total > 0
+          ? `下载中 0 / ${(total / 1024 / 1024).toFixed(1)} MB`
+          : "下载中...";
+      } else if (event.event === "Progress") {
+        downloaded += event.data.chunkLength ?? 0;
+        if (total > 0) {
+          updateProgress.value = Math.min(99, Math.round((downloaded / total) * 100));
+          updateProgressLabel.value = `下载中 ${(downloaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`;
+        }
+      } else if (event.event === "Finished") {
+        updateProgress.value = 100;
+        updateProgressLabel.value = "安装中...";
+      }
+    });
+    // 安装完成后会自动重启（plugin-updater 默认行为）；这里再补一次手动 relaunch 兜底
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (e) {
+    showError(`自动更新失败: ${e}`);
+  } finally {
+    updateBusy.value = false;
+  }
 }
 
 async function checkStartupErrors() {
@@ -463,10 +504,15 @@ onUnmounted(() => {
 
     <!-- 更新通知横条 -->
     <div v-if="updateInfo?.available && !updateDismissed" class="update-banner mb-3">
-      <span class="text-[16px]">新版本 <b>v{{ updateInfo.latest_version }}</b> 可用（当前 v{{ updateInfo.current_version }}）</span>
+      <span class="text-[16px]">
+        <template v-if="!updateBusy">新版本 <b>v{{ updateInfo.latest_version }}</b> 可用（当前 v{{ updateInfo.current_version }}）</template>
+        <template v-else>{{ updateProgressLabel }} {{ updateProgress }}%</template>
+      </span>
       <div class="flex gap-1.5 ml-auto">
-        <button class="btn btn-primary btn-sm" @click="openUpdatePage">立即下载</button>
-        <button class="btn btn-secondary btn-sm" @click="updateDismissed = true">稍后</button>
+        <button class="btn btn-primary btn-sm" :disabled="updateBusy" @click="performAutoUpdate">
+          {{ updateBusy ? "更新中…" : "立即更新" }}
+        </button>
+        <button class="btn btn-secondary btn-sm" :disabled="updateBusy" @click="updateDismissed = true">稍后</button>
       </div>
     </div>
 
