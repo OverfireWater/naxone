@@ -274,12 +274,16 @@ async function loadAppStats() {
 }
 
 async function checkForUpdates() {
+  // getVersion 单独 try：即便 ACL 拒绝，也不阻断 banner 显示
+  let current = "";
   try {
-    // 用 plugin-updater 的 check() 走 latest.json 静态文件（避免 Gitee API 403 限速）
-    const { check } = await import("@tauri-apps/plugin-updater");
     const { getVersion } = await import("@tauri-apps/api/app");
+    current = await getVersion();
+  } catch { /* 旧版本可能缺 core:app:allow-version 权限，降级 */ }
+
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
     const upd = await check();
-    const current = await getVersion();
     if (upd) {
       updateInfo.value = {
         available: true,

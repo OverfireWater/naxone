@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { RefreshCw } from "lucide-vue-next";
 import { toast, friendlyError } from "../composables/useToast";
 import SelectMenu from "../components/SelectMenu.vue";
 
@@ -62,7 +63,62 @@ function toggleAutoStart(service: string) {
   else config.value.auto_start.push(service);
 }
 
-onMounted(() => { loadConfig(); });
+// ─── 应用更新 ───────────────────────────────────
+const currentVersion = ref("");
+const latestVersion = ref("");
+const updateAvailable = ref(false);
+const checking = ref(false);
+const checked = ref(false);
+const updating = ref(false);
+const lastCheckedAt = ref("");
+
+async function loadCurrentVersion() {
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    currentVersion.value = await getVersion();
+  } catch { /* 旧版本可能 ACL 拒绝，忽略 */ }
+}
+
+async function checkUpdate() {
+  if (checking.value || updating.value) return;
+  checking.value = true;
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const upd = await check();
+    if (upd) {
+      updateAvailable.value = true;
+      latestVersion.value = upd.version;
+    } else {
+      updateAvailable.value = false;
+      latestVersion.value = "";
+    }
+    checked.value = true;
+    lastCheckedAt.value = new Date().toLocaleString();
+  } catch (e) {
+    showError("检查更新失败: " + e);
+  } finally {
+    checking.value = false;
+  }
+}
+
+async function doUpdate() {
+  if (updating.value) return;
+  updating.value = true;
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const upd = await check();
+    if (!upd) { toast.info("已是最新版本"); updateAvailable.value = false; return; }
+    await upd.downloadAndInstall();
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (e) {
+    showError("更新失败: " + e);
+  } finally {
+    updating.value = false;
+  }
+}
+
+onMounted(() => { loadConfig(); loadCurrentVersion(); });
 </script>
 
 <template>
@@ -169,6 +225,52 @@ onMounted(() => { loadConfig(); });
           <SelectMenu v-model="config.log_retention_days" :options="logRetentionOptions" full-width trigger-class="input" />
         </div>
       </div>
+    </div>
+
+    <!-- 应用更新 -->
+    <div class="card mb-3">
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">应用更新</h2>
+      <div class="flex items-center justify-between gap-4">
+        <!-- 左：当前版本 -->
+        <div class="flex flex-col gap-0.5 min-w-[100px]">
+          <span class="text-[13px] text-content-muted">当前版本</span>
+          <span class="text-[16px] font-medium tabular-nums">v{{ currentVersion || "—" }}</span>
+        </div>
+
+        <!-- 中：圆形刷新按钮 -->
+        <button
+          class="relative w-11 h-11 rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-60 disabled:cursor-wait disabled:hover:scale-100 disabled:active:scale-100"
+          :disabled="checking || updating"
+          @click="checkUpdate"
+          :title="checking ? '检查中...' : '检查更新'"
+          style="background: rgba(99,128,255,0.12); border: 1px solid var(--border-color)"
+        >
+          <RefreshCw :size="18" :class="checking ? 'animate-spin' : ''" :style="{ color: 'var(--accent-blue)' }" />
+        </button>
+
+        <!-- 右：状态 -->
+        <div class="flex items-center justify-end gap-2 min-w-[160px]">
+          <template v-if="updating">
+            <span class="text-[13px] text-content-muted">更新中...</span>
+          </template>
+          <template v-else-if="updateAvailable">
+            <span class="relative flex h-2.5 w-2.5 shrink-0">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style="background:#ef4444"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5" style="background:#ef4444"></span>
+            </span>
+            <button class="text-[13px] hover:underline" @click="doUpdate" :style="{ color: 'var(--accent-blue)' }">
+              有新版本 v{{ latestVersion }}，点击更新
+            </button>
+          </template>
+          <template v-else-if="checked">
+            <span class="text-[13px] text-content-muted">已是最新版本</span>
+          </template>
+          <template v-else>
+            <span class="text-[13px] text-content-muted">点击按钮检查更新</span>
+          </template>
+        </div>
+      </div>
+      <p v-if="lastCheckedAt" class="text-[13px] text-content-muted mt-2.5">上次检查：{{ lastCheckedAt }}</p>
     </div>
 
     <div class="save-bar">

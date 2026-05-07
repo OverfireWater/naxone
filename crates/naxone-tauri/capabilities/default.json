@@ -3,6 +3,7 @@
   "description": "Default capabilities for NaxOne",
   "windows": ["main"],
   "permissions": [
+    "core:app:default",
     "core:window:default",
     "core:window:allow-close",
     "core:window:allow-minimize",
