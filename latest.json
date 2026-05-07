@@ -1,0 +1,11 @@
+﻿{
+  "version": "v0.5.5",
+  "notes": "## NaxOne v0.5.5 — 修复更新检查 + OTA 全链路打通\n\n### 修复\n\n- **v0.5.3 / v0.5.4 看不到更新提醒**：旧的 `check_for_updates` 调 Gitee API 触发 403 限速，且 Gitee 不支持 `/releases/latest/download/X` 路径。现改用 plugin-updater 的 `check()` 直接拉静态 `latest.json`（双 endpoint：Gitee `raw/main/latest.json` + GitHub `releases/latest/download/latest.json`）。\n- **release_gitee.py 自动维护 main 分支根目录的 latest.json**，每次发版自动 commit + push，让 Gitee raw URL 始终指向最新版。\n\n### ⚠️ 重要：v0.5.3 / v0.5.4 用户需手动安装一次\n\n由于旧版本的更新检查代码已硬编码进 exe 且 Gitee API 限速，无法自动收到本次提醒。请：\n\n1. 从 [Gitee Release](https://gitee.com/kz_y/naxone/releases/tag/v0.5.5) 或 [GitHub Release](https://github.com/OverfireWater/naxone/releases/tag/v0.5.5) 下载 `NaxOne_0.5.5_x64-setup.exe`\n2. 直接覆盖安装（配置兼容）\n\n**装上 v0.5.5 之后所有未来版本都能 OTA 自动升级**，不再需要手动下载。\n",
+  "pub_date": "2026-05-07T10:20:28Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSXBZWmVaZ1pMZjVLQldRdlVOMmwwZkx0azJycUtEeWg4UWVmNmRxME9rd0lYMzdUQmo0bitEUUVseitRMHUycWRLcWlaKzFuRFp6cGNmVnB5K0FUc0NyU2ppTnBoelFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4MTQ5MjI4CWZpbGU6TmF4T25lXzAuNS41X3g2NC1zZXR1cC5leGUKOTM0NGN6NnJra1p2NXZxRVdVOVNQNDlHaTVGeDZaRjlIZ2tsZnJ0SExEUDdXT1BlWXpFdUNwakYxRWpqT1ZqcFQxc2lxMDVsVzB0SUJOTEdENFA4Qnc9PQo=",
+      "url": "https://gitee.com/kz_y/naxone/releases/download/v0.5.5/NaxOne_0.5.5_x64-setup.exe"
+    }
+  }
+}
