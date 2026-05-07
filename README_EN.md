@@ -39,20 +39,35 @@ Stack: **Rust + Tauri 2 + Vue 3 + TypeScript**. Cold start < 1s, resident memory
 
 ## Screenshots
 
-<table>
-<tr>
-<td width="50%"><b>Dashboard</b><br/>Glassmorphism + ambient orbs. One-click start/stop for Nginx/Apache/MySQL/Redis. Multi-version PHP managed in one row<br/><img src="docs/screenshots/01-dashboard.png" alt="Dashboard" /></td>
-<td width="50%"><b>New Site</b><br/>Three tabs: Basic / Rewrite preset / SSL & advanced<br/><img src="docs/screenshots/03-vhosts-modal-basic.png" alt="New site" /></td>
-</tr>
-<tr>
-<td><b>Software Store</b><br/>Built-in multi-version downloads for PHP/Nginx/MySQL/etc., multi-mirror acceleration, SHA-256 verified<br/><img src="docs/screenshots/06-store.png" alt="Store" /></td>
-<td><b>Service Config · Nginx</b><br/>19 common Nginx options visualized, automatic <code>.bak</code> before write<br/><img src="docs/screenshots/08-config-nginx.png" alt="Nginx config" /></td>
-</tr>
-<tr>
-<td><b>Global Environment</b><br/>One-click switch global CLI <code>php</code> / <code>composer</code> / <code>node</code> / <code>mysql</code> versions<br/><img src="docs/screenshots/07-config-env.png" alt="Global env" /></td>
-<td><b>Settings</b><br/>PHPStudy path / WWW root / ports / auto-start / theme<br/><img src="docs/screenshots/13-settings.png" alt="Settings" /></td>
-</tr>
-</table>
+### Dashboard
+Glassmorphism + ambient orbs. One-click start/stop for Nginx/Apache/MySQL/Redis, multi-version PHP managed in one row.
+
+![Dashboard](docs/screenshots/01-dashboard.png)
+
+### New Site
+Three tabs: Basic config / Rewrite preset / SSL & advanced, auto-syncs hosts file.
+
+![New site](docs/screenshots/03-vhosts-modal-basic.png)
+
+### Software Store
+Built-in multi-version downloads for PHP/Nginx/MySQL/etc., multi-mirror acceleration, SHA-256 verified.
+
+![Store](docs/screenshots/06-store.png)
+
+### Service Config · Nginx
+19 common Nginx options visualized, automatic `.bak` before every write.
+
+![Nginx config](docs/screenshots/08-config-nginx.png)
+
+### Global Environment
+One-click switch global CLI `php` / `composer` / `node` / `mysql` versions.
+
+![Global env](docs/screenshots/07-config-env.png)
+
+### Settings
+PHPStudy path / WWW root / ports / auto-start / theme.
+
+![Settings](docs/screenshots/13-settings.png)
 
 > More screenshots in [docs/screenshots/](docs/screenshots/) (13 total, covers every page).
 
@@ -179,7 +194,6 @@ naxone/
 - **PHPStudy Pro**: Auto-scans its `Extensions` directory for PHP/Nginx/Apache/MySQL/Redis packages; the vhost config format generated is identical to PHPStudy's, allowing two-way migration.
 - **Official PHP packages**: Directly recognizes zip archives extracted from windows.php.net.
 - **Config files**: Every write operation creates a `.bak` backup first.
-- **Migrating from RustStudy**: On first launch, NaxOne automatically migrates `~/.ruststudy` and `%APPDATA%\RustStudy` to the corresponding NaxOne directories.
 
 ## License
 

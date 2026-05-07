@@ -8,101 +8,104 @@
   body {
     font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 50%, #f0fdff 100%);
-    padding: 56px 80px;
-    width: 1400px;
+    padding: 64px 80px;
+    width: 1200px;
     color: #0f172a;
     -webkit-font-smoothing: antialiased;
   }
   h1.title {
-    font-size: 32px;
+    font-size: 40px;
     font-weight: 700;
     color: #1e293b;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     letter-spacing: -0.5px;
   }
   .subtitle {
-    font-size: 16px;
-    color: #64748b;
-    margin-bottom: 40px;
+    font-size: 19px;
+    color: #475569;
+    margin-bottom: 48px;
   }
   .layer {
-    background: rgba(255, 255, 255, 0.7);
-    border: 1.5px solid;
-    border-radius: 24px;
-    padding: 28px 36px;
-    margin-bottom: 24px;
+    background: rgba(255, 255, 255, 0.75);
+    border: 2px solid;
+    border-radius: 28px;
+    padding: 36px 40px;
+    margin-bottom: 28px;
     backdrop-filter: blur(12px);
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
     position: relative;
   }
   .layer-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 18px;
+    margin-bottom: 28px;
   }
   .layer-icon {
-    width: 40px; height: 40px;
-    border-radius: 12px;
+    width: 56px; height: 56px;
+    border-radius: 16px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
+    font-size: 30px;
+    flex-shrink: 0;
   }
   .layer-title {
-    font-size: 18px;
+    font-size: 24px;
     font-weight: 700;
     color: #1e293b;
+    letter-spacing: -0.3px;
   }
   .layer-desc {
-    font-size: 13px;
-    color: #64748b;
-    margin-top: 2px;
+    font-size: 15px;
+    color: #475569;
+    margin-top: 4px;
   }
   .cards {
     display: grid;
-    gap: 16px;
+    gap: 18px;
   }
   .card {
     background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
-    border-radius: 16px;
-    padding: 18px 22px;
-    border: 1px solid;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+    border-radius: 18px;
+    padding: 22px 26px;
+    border: 1.5px solid;
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.04);
     display: flex;
     align-items: flex-start;
-    gap: 14px;
+    gap: 18px;
   }
   .card-icon {
     flex-shrink: 0;
-    width: 36px; height: 36px;
-    border-radius: 10px;
+    width: 48px; height: 48px;
+    border-radius: 14px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 18px;
+    font-size: 24px;
   }
   .card-body { flex: 1; min-width: 0; }
   .card-title {
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
     color: #1e293b;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    letter-spacing: -0.2px;
   }
   .card-desc {
-    font-size: 12.5px;
-    color: #64748b;
-    line-height: 1.55;
+    font-size: 14.5px;
+    color: #475569;
+    line-height: 1.6;
   }
   .arrow {
     text-align: center;
-    margin: 4px 0;
+    margin: 6px 0;
     color: #94a3b8;
-    font-size: 18px;
+    font-size: 26px;
     font-weight: 300;
     letter-spacing: 8px;
   }
-  /* Layer color schemes */
+  /* 配色 */
   .layer-frontend { border-color: #c7d2fe; background: linear-gradient(135deg, rgba(238, 242, 255, 0.85), rgba(250, 245, 255, 0.85)); }
   .layer-frontend .layer-icon { background: #e0e7ff; color: #4f46e5; }
   .layer-frontend .card { border-color: #e0e7ff; }
@@ -119,30 +122,25 @@
   .layer-adapters .layer-icon { background: #dcfce7; color: #15803d; }
   .layer-adapters .card { border-color: #dcfce7; }
   .layer-adapters .card-icon { background: #dcfce7; color: #15803d; }
-  .layer-platform { border-color: #fed7aa; background: linear-gradient(135deg, rgba(255, 247, 237, 0.85), rgba(254, 252, 232, 0.85)); }
-  .layer-platform .layer-icon { background: #ffedd5; color: #c2410c; }
-  .layer-platform .card { border-color: #ffedd5; }
-  .layer-platform .card-icon { background: #ffedd5; color: #c2410c; }
 
   .grid-2 { grid-template-columns: 1fr 1fr; }
   .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
-  .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
 
   .footer {
-    margin-top: 40px;
+    margin-top: 48px;
     text-align: center;
-    color: #94a3b8;
-    font-size: 13px;
+    color: #64748b;
+    font-size: 15px;
   }
   .badge {
     display: inline-block;
-    padding: 2px 10px;
-    border-radius: 10px;
-    font-size: 11px;
+    padding: 3px 12px;
+    border-radius: 11px;
+    font-size: 13px;
     font-weight: 600;
     background: #e0e7ff;
     color: #4338ca;
-    margin-left: 8px;
+    margin-left: 10px;
     vertical-align: middle;
   }
 </style>
@@ -152,7 +150,6 @@
 <h1 class="title">NaxOne · 整体架构</h1>
 <p class="subtitle">六边形架构 (Hexagonal / Ports &amp; Adapters) · 核心业务逻辑与外部依赖完全解耦</p>
 
-<!-- 前端 -->
 <div class="layer layer-frontend">
   <div class="layer-header">
     <div class="layer-icon">🖥</div>
@@ -170,7 +167,6 @@
 
 <div class="arrow">▼ Tauri invoke()</div>
 
-<!-- Tauri IPC -->
 <div class="layer layer-tauri">
   <div class="layer-header">
     <div class="layer-icon">📦</div>
@@ -187,7 +183,6 @@
 
 <div class="arrow">▼</div>
 
-<!-- Core -->
 <div class="layer layer-core">
   <div class="layer-header">
     <div class="layer-icon">🔷</div>
@@ -205,45 +200,25 @@
 
 <div class="arrow">▼ implements traits</div>
 
-<!-- Adapters -->
 <div class="layer layer-adapters">
   <div class="layer-header">
     <div class="layer-icon">🔧</div>
     <div>
-      <div class="layer-title">naxone-adapters · 端口实现 <span class="badge">Platform</span></div>
-      <div class="layer-desc">具体的进程管理 / 文件 IO / 模板渲染 / 平台 API · 平台相关</div>
+      <div class="layer-title">naxone-adapters · 端口实现 + 操作系统 <span class="badge">Platform</span></div>
+      <div class="layer-desc">具体进程管理 / 文件 IO / 模板渲染 · 调用 Windows API · 平台相关</div>
     </div>
   </div>
   <div class="cards grid-3">
-    <div class="card"><div class="card-icon">⚡</div><div class="card-body"><div class="card-title">NativeProcessManager</div><div class="card-desc">启停 · 端口探测 · PID 跟踪 · watchdog</div></div></div>
-    <div class="card"><div class="card-icon">📁</div><div class="card-body"><div class="card-title">FsConfigIO</div><div class="card-desc">原子写 (tempfile + rename) · .bak 备份</div></div></div>
-    <div class="card"><div class="card-icon">📝</div><div class="card-body"><div class="card-title">SimpleTemplateEngine</div><div class="card-desc">nginx / apache vhost 渲染 + 注入校验</div></div></div>
-    <div class="card"><div class="card-icon">🪟</div><div class="card-body"><div class="card-title">WindowsPlatform</div><div class="card-desc">hosts · UAC 提权 · 自签 SSL · icacls 权限</div></div></div>
-    <div class="card"><div class="card-icon">📦</div><div class="card-body"><div class="card-title">PackageScanner</div><div class="card-desc">PHPStudy 扫描 + 软件商店包安装 + sha256 校验</div></div></div>
-    <div class="card"><div class="card-icon">🌐</div><div class="card-body"><div class="card-title">reqwest + zip</div><div class="card-desc">远程包下载 · zip-slip 防护 · 镜像加速</div></div></div>
+    <div class="card"><div class="card-icon">⚡</div><div class="card-body"><div class="card-title">NativeProcessManager</div><div class="card-desc">启停 · 端口探测 · PID 跟踪 · watchdog 自动重启</div></div></div>
+    <div class="card"><div class="card-icon">📁</div><div class="card-body"><div class="card-title">FsConfigIO</div><div class="card-desc">原子写 (tempfile + rename) · .bak 自动备份</div></div></div>
+    <div class="card"><div class="card-icon">📝</div><div class="card-body"><div class="card-title">SimpleTemplateEngine</div><div class="card-desc">nginx / apache vhost 渲染 + 注入校验防护</div></div></div>
+    <div class="card"><div class="card-icon">🪟</div><div class="card-body"><div class="card-title">WindowsPlatform</div><div class="card-desc">hosts · UAC 提权 · 自签 SSL · icacls ACL · winreg PATH</div></div></div>
+    <div class="card"><div class="card-icon">📦</div><div class="card-body"><div class="card-title">PackageScanner</div><div class="card-desc">PHPStudy 扫描 + 软件商店 + sha256 强制校验</div></div></div>
+    <div class="card"><div class="card-icon">🌐</div><div class="card-body"><div class="card-title">reqwest + zip</div><div class="card-desc">远程包下载 · zip-slip 防护 · 多镜像加速</div></div></div>
   </div>
 </div>
 
-<div class="arrow">▼</div>
-
-<!-- Platform -->
-<div class="layer layer-platform">
-  <div class="layer-header">
-    <div class="layer-icon">⚡</div>
-    <div>
-      <div class="layer-title">操作系统 · Windows API <span class="badge">OS</span></div>
-      <div class="layer-desc">底层调用：进程 / 文件 / 网络 / 权限</div>
-    </div>
-  </div>
-  <div class="cards grid-4">
-    <div class="card"><div class="card-icon">🔍</div><div class="card-body"><div class="card-title">WMI · netstat</div><div class="card-desc">PID 查询 · 端口监听</div></div></div>
-    <div class="card"><div class="card-icon">🛡</div><div class="card-body"><div class="card-title">icacls · DPAPI</div><div class="card-desc">文件 ACL · 凭据保护</div></div></div>
-    <div class="card"><div class="card-icon">🔥</div><div class="card-body"><div class="card-title">netsh</div><div class="card-desc">防火墙端口规则</div></div></div>
-    <div class="card"><div class="card-icon">🔑</div><div class="card-body"><div class="card-title">UAC · winreg</div><div class="card-desc">提权 · 用户 PATH</div></div></div>
-  </div>
-</div>
-
-<div class="footer">NaxOne v0.5.0 · MIT License · Rust + Tauri 2 + Vue 3</div>
+<div class="footer">NaxOne · MIT License · Rust + Tauri 2 + Vue 3 + TypeScript</div>
 
 </body>
 </html>

@@ -11,7 +11,7 @@ const require = createRequire(path.join(__dirname, "../../crates/naxone-tauri/fr
 const puppeteer = require("puppeteer-core");
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const PAGES = ["architecture", "service-flow", "vhost-flow"];
-const WIDTH = 1400;
+const WIDTH = 1200;
 
 if (!existsSync(EDGE)) {
   console.error(`Edge 不在: ${EDGE}`);

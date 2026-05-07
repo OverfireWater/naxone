@@ -54,9 +54,7 @@ async function close() { await appWindow.close(); }
     <div class="flex items-center justify-between h-9 shrink-0"
          style="background: transparent">
       <div class="flex-1 h-full flex items-center gap-2.5 pl-4 titlebar-drag" data-tauri-drag-region>
-        <div class="w-5 h-5 bg-gradient-to-br from-indigo-500 to-blue-400 rounded-md flex items-center justify-center titlebar-drag" data-tauri-drag-region>
-          <span class="text-[13px] font-bold text-white leading-none titlebar-drag" data-tauri-drag-region>R</span>
-        </div>
+        <img src="/logo.png" alt="NaxOne" class="w-5 h-5 titlebar-drag" data-tauri-drag-region draggable="false" />
         <span class="text-[13px] font-medium titlebar-drag" style="color: var(--text-muted)" data-tauri-drag-region>{{ APP_NAME }}</span>
       </div>
       <div class="flex h-full titlebar-no-drag">
