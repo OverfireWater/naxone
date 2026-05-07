@@ -168,6 +168,11 @@ const emit = defineEmits<{
 /// store 来源：现状逻辑（删 NaxOne 装的目录 + 清环境）
 async function doUninstallStore() {
   if (uninstalling.value || !isSelectedInstalled.value) return;
+  const ok = await confirm(
+    `确认卸载 ${props.pkg.display_name} v${selectedVersion.value}？\n\n将删除 NaxOne 安装的程序目录和相关环境配置（PATH 等）。该版本若有数据（如 MySQL data 目录）仅在卸载流程允许保留时不动。此操作不可撤销。`,
+    { title: "卸载软件", kind: "warning" }
+  );
+  if (!ok) return;
   uninstalling.value = true;
   errorMsg.value = "";
   try {
@@ -192,7 +197,7 @@ async function doUnlinkSystem() {
   uninstalling.value = true;
   errorMsg.value = "";
   try {
-    const report: any = await invoke("unlink_system_tool", { name: props.pkg.name });
+    const report = await invoke<{ errors: string[] }>("unlink_system_tool", { name: props.pkg.name });
     uninstallMode.value = "none";
     if (report.errors && report.errors.length > 0) {
       errorMsg.value = `部分失败: ${report.errors.join("; ")}`;
@@ -225,10 +230,15 @@ async function showDeepPreview() {
 
 async function doDeepUninstallSystem() {
   if (uninstalling.value || !isSystemInstalled.value) return;
+  const ok = await confirm(
+    `⚠️ 彻底卸载 ${props.pkg.display_name}：将删除系统已装的可执行文件、目录与环境变量。\n\n这是不可逆操作！如果该工具是其他软件（如 IDE、Composer）依赖项，可能导致那些软件不可用。\n\n确定继续？`,
+    { title: "彻底卸载（不可逆）", kind: "warning" }
+  );
+  if (!ok) return;
   uninstalling.value = true;
   errorMsg.value = "";
   try {
-    const report: any = await invoke("deep_uninstall_system_tool", { name: props.pkg.name });
+    const report = await invoke<{ errors: string[] }>("deep_uninstall_system_tool", { name: props.pkg.name });
     uninstallMode.value = "none";
     preview.value = null;
     if (report.errors && report.errors.length > 0) {

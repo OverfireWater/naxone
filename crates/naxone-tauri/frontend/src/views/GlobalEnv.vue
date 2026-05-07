@@ -5,7 +5,7 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AlertTriangle, Eye, EyeOff } from "lucide-vue-next";
 import SelectMenu from "../components/SelectMenu.vue";
-import { toast } from "../composables/useToast";
+import { toast, friendlyError } from "../composables/useToast";
 
 interface ServiceInfo {
   id: string; kind: string; display_name: string; version: string;
@@ -71,7 +71,7 @@ function phpOptionLabel(p: ServiceInfo): string {
 function sourceLabel(s: string): string {
   return s === "system" ? "系统" : "NX";
 }
-function showError(msg: string) { toast.error(String(msg)); }
+function showError(msg: unknown) { toast.error(friendlyError(msg)); }
 
 async function loadServices() {
   try { services.value = await invoke("get_services"); }

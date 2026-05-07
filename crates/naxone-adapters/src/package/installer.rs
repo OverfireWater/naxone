@@ -190,10 +190,22 @@ impl Installer {
         }
 
         // ---------- SHA256 ----------
-        if let Some(expected) = &version.sha256 {
-            if let Err(e) = verify_sha256(&temp_zip, expected).await {
+        // 必须有清单声明的哈希；否则拒绝安装。这避免了"清单缺校验时静默通过"导致供应链攻击的窗口。
+        match &version.sha256 {
+            Some(expected) => {
+                if let Err(e) = verify_sha256(&temp_zip, expected).await {
+                    let _ = std::fs::remove_file(&temp_zip);
+                    return fail(&tx, &name, &ver, e);
+                }
+            }
+            None => {
                 let _ = std::fs::remove_file(&temp_zip);
-                return fail(&tx, &name, &ver, e);
+                return fail(
+                    &tx,
+                    &name,
+                    &ver,
+                    "包清单缺少 sha256 哈希校验，已拒绝安装。请联系维护者补全清单或选择其它版本。".to_string(),
+                );
             }
         }
 

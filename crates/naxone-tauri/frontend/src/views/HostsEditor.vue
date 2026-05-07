@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { toast } from "../composables/useToast";
+import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 
 const content = ref("");
@@ -12,8 +12,8 @@ const hostsPath = ref("");
 
 const dirty = computed(() => content.value !== original.value);
 
-function showError(msg: string) {
-  toast.error(String(msg));
+function showError(msg: unknown) {
+  toast.error(friendlyError(msg));
 }
 
 async function loadHosts() {

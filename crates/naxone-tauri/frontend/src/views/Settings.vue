@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { toast } from "../composables/useToast";
+import { toast, friendlyError } from "../composables/useToast";
 import SelectMenu from "../components/SelectMenu.vue";
 
 interface ConfigDto {
@@ -29,7 +29,7 @@ function setTheme(mode: string) {
   window.dispatchEvent(new CustomEvent("theme-change", { detail: mode }));
 }
 
-function showError(msg: string) { toast.error(String(msg)); }
+function showError(msg: unknown) { toast.error(friendlyError(msg)); }
 
 async function loadConfig() { try { config.value = await invoke("get_config"); } catch (e) { showError("加载配置失败: " + e); } }
 

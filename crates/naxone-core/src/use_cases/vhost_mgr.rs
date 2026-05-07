@@ -119,6 +119,9 @@ impl VhostManager {
         apache_listen_conf: Option<&Path>,
         running_web_server: Option<&ServiceInstance>,
     ) -> Result<()> {
+        // 深度防御：use_case 入口再校验一遍。即便 commands 层已经 validate，
+        // 任何绕过 commands 直调 use_case 的路径也走不出注入。
+        vhost.validate().map_err(NaxOneError::Config)?;
         let mut rb = Rollback::new(self.config_io.as_ref(), self.platform_ops.as_ref());
         match self
             .write_vhost_with_rollback(

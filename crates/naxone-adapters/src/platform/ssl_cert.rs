@@ -73,7 +73,33 @@ pub fn generate_self_signed(
     std::fs::write(&key_path, key_pem)
         .map_err(|e| format!("写私钥失败 {}: {}", key_path.display(), e))?;
 
+    // 私钥文件设最严 ACL：只 owner 可读写，避免同机其它账户拿到 .key
+    #[cfg(target_os = "windows")]
+    restrict_acl_owner_only(&key_path);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+    }
+
     Ok((cert_path, key_path))
+}
+
+#[cfg(target_os = "windows")]
+fn restrict_acl_owner_only(path: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let username = std::env::var("USERNAME").unwrap_or_default();
+    if username.is_empty() {
+        return;
+    }
+    let _ = std::process::Command::new("icacls")
+        .arg(path)
+        .arg("/inheritance:r")
+        .arg("/grant:r")
+        .arg(format!("{}:(R,W)", username))
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 }
 
 fn sanitize_filename(name: &str) -> String {

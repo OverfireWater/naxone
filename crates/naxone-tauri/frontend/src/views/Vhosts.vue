@@ -1,8 +1,8 @@
 ﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
-import { toast } from "../composables/useToast";
+import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
 import { Pencil, ExternalLink, FolderOpen, Trash2 } from "lucide-vue-next";
@@ -52,7 +52,6 @@ const busy = ref(false);
 const searchQuery = ref("");
 const showForm = ref(false);
 const editingId = ref<string | null>(null);
-const confirmDeleteId = ref<string | null>(null);
 const modalTab = ref<"basic" | "rewrite" | "ssl">("basic");
 const rewritePreset = ref("");
 // WWW 根目录（用户在设置里配的），新建 vhost 时用它作 document_root 默认值
@@ -74,7 +73,7 @@ function formatDate(d: string): string {
   return d.replace(/-/g, "/");
 }
 
-function showError(msg: string) { toast.error(String(msg)); }
+function showError(msg: unknown) { toast.error(friendlyError(msg)); }
 function showSuccess(msg: string) { toast.success(String(msg)); }
 let floatTimer: number | null = null;
 function showFloat(msg: string, type: "success" | "error" = "success") {
@@ -172,9 +171,21 @@ async function saveVhost() {
   } catch (e) { showError("保存失败: " + e); } finally { busy.value = false; }
 }
 
-async function deleteVhost(id: string) {
-  busy.value = true; confirmDeleteId.value = null;
-  try { vhosts.value = await invoke("delete_vhost", { id }); showSuccess("站点已删除，已自动 reload Web 服务器"); } catch (e) { showError("删除失败: " + e); } finally { busy.value = false; }
+async function deleteVhost(vh: VhostInfo) {
+  const ok = await confirm(
+    `确认删除站点 "${vh.server_name}:${vh.listen_port}"？\n\n将同时删除 Nginx + Apache 双向配置文件和 hosts 条目。此操作不可恢复（站点目录文件不会被删除，仅清理服务器配置）。`,
+    { title: "删除站点", kind: "warning" }
+  );
+  if (!ok) return;
+  busy.value = true;
+  try {
+    vhosts.value = await invoke("delete_vhost", { id: vh.id });
+    showSuccess("站点已删除，已自动 reload Web 服务器");
+  } catch (e) {
+    showError("删除失败: " + e);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function browseFolder() { const s = await open({ directory: true, multiple: false }); if (s) { form.value.document_root = s as string; docRootTouched.value = true; } }
@@ -253,8 +264,8 @@ function phpDisplay(raw: string | null): { v: string; variant: string } | null {
 }
 
 function sourceBadge(v: VhostInfo): { text: string; color: string } | null {
-  if (v.source === "phpstudy") return { text: "PS", color: "#8b5cf6" };
-  if (v.source === "standalone") return { text: "独立", color: "#06b6d4" };
+  if (v.source === "phpstudy") return { text: "PS", color: "var(--color-purple)" };
+  if (v.source === "standalone") return { text: "独立", color: "var(--color-cyan)" };
   return null; // custom: no badge, it's the default
 }
 
@@ -302,8 +313,8 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
 
         <!-- Modal tabs -->
         <div class="flex gap-0 border-b mb-3" style="border-color: var(--border-color)">
-          <button v-for="t in [{k:'basic',l:'基础配置'},{k:'rewrite',l:'伪静态'},{k:'ssl',l:'SSL 与高级'}]" :key="t.k"
-            class="modal-tab" :class="{ active: modalTab === t.k }" @click="modalTab = t.k as any">{{ t.l }}</button>
+          <button v-for="t in ([{k:'basic',l:'基础配置'},{k:'rewrite',l:'伪静态'},{k:'ssl',l:'SSL 与高级'}] as const)" :key="t.k"
+            class="modal-tab" :class="{ active: modalTab === t.k }" @click="modalTab = t.k">{{ t.l }}</button>
         </div>
 
         <!-- Tab: 基础配置 -->
@@ -400,16 +411,10 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           </label>
         </div>
         <div class="w-40 shrink-0 flex items-center gap-1 justify-end">
-          <template v-if="confirmDeleteId === vh.id">
-            <button class="btn btn-danger btn-sm" @click="deleteVhost(vh.id)" :disabled="busy">确认</button>
-            <button class="btn btn-secondary btn-sm" @click="confirmDeleteId = null">取消</button>
-          </template>
-          <template v-else>
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openEdit(vh)" :disabled="busy" title="编辑"><Pencil :size="14" /></button>
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openSite(vh); showFloat('已在浏览器打开')" title="在浏览器打开"><ExternalLink :size="14" /></button>
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openDir(vh); showFloat('已打开目录')" title="打开目录"><FolderOpen :size="14" /></button>
-            <button class="btn btn-secondary btn-sm !px-2 transition-opacity hover:!text-red-400" @click="confirmDeleteId = vh.id" :disabled="busy" title="删除"><Trash2 :size="14" /></button>
-          </template>
+            <button class="btn btn-secondary btn-sm !px-2 transition-opacity hover:!text-red-400" @click="deleteVhost(vh)" :disabled="busy" title="删除"><Trash2 :size="14" /></button>
         </div>
       </div>
     </div>

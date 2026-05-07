@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import { toast } from "../composables/useToast";
+import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
 import GlobalEnv from "./GlobalEnv.vue";
@@ -74,7 +74,7 @@ const phpSameSiteOptions = [
   { label: "None", value: "None" },
 ];
 
-function showError(msg: string) { toast.error(String(msg)); }
+function showError(msg: unknown) { toast.error(friendlyError(msg)); }
 function showSaved() { saved.value = true; setTimeout(() => (saved.value = false), 2000); }
 
 // ======================== Nginx ========================
@@ -403,10 +403,10 @@ onMounted(() => {
         <SelectMenu v-if="phpInstances.length > 0" :model-value="selectedPhp?.id ?? null" :options="phpInstanceOptions" trigger-class="input w-[240px] shrink-0" @update:modelValue="selectPhpInstance($event)" />
         <div class="flex gap-1 shrink-0">
           <button
-            v-for="st in [{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'}]" :key="st.k"
+            v-for="st in ([{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'}] as const)" :key="st.k"
             class="px-4 py-1.5 rounded-md text-[16px] cursor-pointer transition-all border"
             :class="phpSubTab === st.k ? 'bg-accent-blue text-white border-accent-blue' : 'bg-surface-primary text-content-muted border-border hover:text-content-secondary'"
-            @click="phpSubTab = st.k as any"
+            @click="phpSubTab = st.k"
           >{{ st.l }}</button>
         </div>
       </div>

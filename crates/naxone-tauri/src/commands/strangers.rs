@@ -106,6 +106,31 @@ pub async fn kill_stranger(pid: u32, state: State<'_, AppState>) -> Result<(), S
     if pid == 0 {
         return Err("无效 PID".into());
     }
+
+    // 白名单：只允许杀已知 web/db 工具进程，禁止误杀系统进程（svchost、explorer 等）
+    let exe_name = naxone_adapters::process::windows::get_process_name(pid).await
+        .unwrap_or_default()
+        .to_lowercase();
+    const ALLOWED_EXES: &[&str] = &[
+        "nginx.exe",
+        "httpd.exe",
+        "mysqld.exe",
+        "mysqld-nt.exe",
+        "redis-server.exe",
+        "php-cgi.exe",
+        "php.exe",
+        "xp.cn_cgi.exe", // PHPStudy 的 php-cgi 改名
+    ];
+    if exe_name.is_empty() {
+        return Err(format!("无法读取 PID {} 的进程信息（可能已退出或权限不足）", pid));
+    }
+    if !ALLOWED_EXES.iter().any(|allowed| &exe_name == allowed) {
+        return Err(format!(
+            "拒绝结束 PID {}（{}）：不在 NaxOne 可管理的服务进程白名单内",
+            pid, exe_name
+        ));
+    }
+
     let out = std::process::Command::new("taskkill")
         .args(["/F", "/PID", &pid.to_string()])
         .output()

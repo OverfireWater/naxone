@@ -144,13 +144,34 @@ fn default_workers() -> u16 {
 }
 
 impl AppConfig {
-    /// Load config from a TOML file
+    /// Load config from a TOML file。
+    /// 解析失败时不再 crash：把坏文件重命名为 .corrupt-<ts>.toml 留底，返回 Err，
+    /// 让 caller（state.rs）走 default_config() 兜底初始化。
     pub fn load(path: &Path) -> crate::error::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| crate::error::NaxOneError::Config(format!("Failed to read config: {e}")))?;
-        let config: Self = toml::from_str(&content)
-            .map_err(|e| crate::error::NaxOneError::Config(format!("Failed to parse config: {e}")))?;
-        Ok(config)
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => return Err(crate::error::NaxOneError::Config(format!("Failed to read config: {e}"))),
+        };
+        match toml::from_str::<Self>(&content) {
+            Ok(c) => Ok(c),
+            Err(e) => {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let corrupt = path.with_extension(format!("corrupt-{}.toml", ts));
+                let _ = std::fs::rename(path, &corrupt);
+                tracing::warn!(
+                    "naxone.toml 解析失败（{}），原文件已重命名为 {}，本次启动将使用默认配置重建。",
+                    e,
+                    corrupt.display()
+                );
+                Err(crate::error::NaxOneError::Config(format!(
+                    "naxone.toml 已损坏，已备份至 {}",
+                    corrupt.display()
+                )))
+            }
+        }
     }
 
     /// Save config to a TOML file

@@ -14,6 +14,38 @@ fn persist_vhosts(vhosts: &[VirtualHost], state: &AppState) {
     let _ = state.vhost_manager.save_vhosts_json(&path, vhosts);
 }
 
+/// 校验 document_root：必须是绝对路径，禁止指向系统保留目录。
+/// 平台相关检查放在 commands 层，不污染 core。
+fn validate_document_root(p: &std::path::Path) -> Result<(), String> {
+    if !p.is_absolute() {
+        return Err("网站目录必须是绝对路径".into());
+    }
+    let s = p.display().to_string().to_lowercase().replace('\\', "/");
+    const BLOCKED: &[&str] = &[
+        "c:/windows",
+        "c:/program files",
+        "c:/program files (x86)",
+        "c:/programdata",
+        "c:/$recycle.bin",
+        "c:/boot",
+        "c:/perflogs",
+        "c:/system volume information",
+    ];
+    for b in BLOCKED {
+        if s == *b || s.starts_with(&format!("{}/", b)) {
+            return Err(format!("不允许将网站目录设在系统路径下: {}", p.display()));
+        }
+    }
+    Ok(())
+}
+
+/// vhost 字段 + 路径双重校验，create/update 入口统一调用。
+fn prevalidate_vhost(vhost: &VirtualHost) -> Result<(), String> {
+    vhost.validate()?;
+    validate_document_root(&vhost.document_root)?;
+    Ok(())
+}
+
 // ==================== SSL 自签 ====================
 
 #[derive(Debug, Serialize)]
@@ -358,6 +390,11 @@ pub async fn create_vhost(
     let services = state.services.read().await;
     let vhost = build_vhost(&req, &state, &services);
 
+    if let Err(e) = prevalidate_vhost(&vhost) {
+        push_log(&state, LogLevel::Error, "vhost", format!("创建站点 {}:{} 被拒绝", vhost.server_name, vhost.listen_port), Some(e.clone()), None).await;
+        return Err(e);
+    }
+
     if let Err(e) = std::fs::create_dir_all(&vhost.document_root) {
         let msg = format!("创建网站目录失败: {}", e);
         push_log(&state, LogLevel::Error, "vhost", format!("创建站点 {}:{} 失败", vhost.server_name, vhost.listen_port), Some(msg.clone()), None).await;
@@ -425,6 +462,11 @@ pub async fn update_vhost(
     let running_ws = VhostManager::find_running_web_server(&services);
 
     let domain = new_vhost.server_name.clone();
+
+    if let Err(e) = prevalidate_vhost(&new_vhost) {
+        push_log(&state, LogLevel::Error, "vhost", format!("更新站点 {} 被拒绝", domain), Some(e.clone()), None).await;
+        return Err(e);
+    }
 
     // 端口冲突预检（仅当端口变更时）
     if old.listen_port != new_vhost.listen_port {

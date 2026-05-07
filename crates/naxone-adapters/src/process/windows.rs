@@ -143,8 +143,13 @@ impl WindowsProcessManager {
                         .stderr(std::process::Stdio::piped())
                         .spawn()
                     {
-                        Ok(child) => {
+                        Ok(mut child) => {
                             let new_pid = child.id().unwrap_or(0);
+                            // 显式 drop stdout/stderr 管道避免长期持有 → 底层 OS 句柄能尽早释放
+                            drop(child.stdout.take());
+                            drop(child.stderr.take());
+                            // detach child handle，让 OS 自行清理（PHP-CGI 是长期进程，watchdog 不 wait）
+                            drop(child);
                             tokio::time::sleep(Duration::from_millis(500)).await;
                             processes
                                 .write()
@@ -853,7 +858,12 @@ async fn pid_matches_service(pid: u32, kind: ServiceKind) -> bool {
 
 /// 比 pid_matches_service 严格一档：除了进程名匹配，还要求 exe 路径在 instance.install_path 下。
 /// 解决"同 kind 多版本共享端口"导致的状态错位（如装了两个 Redis，跑着 3.0.504 时 5.0.14.1 也报 Running）。
-/// 取不到 exe 路径时退化为只信进程名（避免误报 Stopped）。
+///
+/// 取不到 exe 路径时（典型：dev 模式普通权限读 admin 进程被拒，wmic 返回空）的处理：
+/// **降级为 pid_matches_service**——只信进程名 + kind 匹配。
+/// 这是在「保守判定 Stopped」（用户痛点：明明在跑显示已停止）和「多版本误报 Running」之间的取舍：
+/// admin 进程只在用户机器上存在 PHPStudy 等场景，多版本误报概率低；而 admin 拒访问是高频的。
+/// 多版本场景由调用方在 install_path 已知时另行去重。
 async fn pid_matches_instance(pid: u32, instance: &ServiceInstance) -> bool {
     if pid == 0 {
         return false;
@@ -861,11 +871,10 @@ async fn pid_matches_instance(pid: u32, instance: &ServiceInstance) -> bool {
     if !pid_matches_service(pid, instance.kind).await {
         return false;
     }
-    // 取不到 exe 路径（典型：PHPStudy 等管理员进程，普通权限拒绝访问）→ 保守判定为
-    // **不属于本实例**。否则同 kind 多版本（如 store v5/v8 + PHPStudy v5）都会被
-    // 端口判定为 Running，进而把卸载/启动等逻辑全带歪。
     let Some(exe_path) = get_process_exe_path(pid).await else {
-        return false;
+        // 取不到 exe path：降级信任进程名 + kind（已 pid_matches_service 过）
+        tracing::debug!(pid, kind = ?instance.kind, "pid_matches_instance: exe path 不可读，降级为名字匹配");
+        return true;
     };
     let exe = exe_path.replace('/', "\\").to_lowercase();
     let install = instance

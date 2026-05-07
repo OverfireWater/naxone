@@ -111,31 +111,43 @@ fn scan_service_dirs(
     config_candidates: &[&str],
     instances: &mut Vec<ServiceInstance>,
 ) {
-    if let Ok(entries) = std::fs::read_dir(extensions_path) {
-        let prefix_lower = prefix.to_lowercase();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default();
-                if name.to_lowercase().starts_with(&prefix_lower) && path.join(exe_relative).exists()
-                {
-                    let version = extract_version(name, prefix);
-                    let config_path = resolve_config(&path, config_candidates);
-                    instances.push(ServiceInstance {
-                        kind,
-                        version,
-                        variant: None,
-                        install_path: path,
-                        config_path,
-                        port: default_port,
-                        status: ServiceStatus::Stopped,
-                        auto_start: false,
-                        origin: ServiceOrigin::PhpStudy,
-                    });
-                }
+    let entries = match std::fs::read_dir(extensions_path) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("扫描 {} 失败: {} —— 该类型服务可能不可见", extensions_path.display(), e);
+            return;
+        }
+    };
+    let prefix_lower = prefix.to_lowercase();
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("读 {} 子项失败: {}（已跳过该项）", extensions_path.display(), e);
+                continue;
+            }
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if name.to_lowercase().starts_with(&prefix_lower) && path.join(exe_relative).exists()
+            {
+                let version = extract_version(name, prefix);
+                let config_path = resolve_config(&path, config_candidates);
+                instances.push(ServiceInstance {
+                    kind,
+                    version,
+                    variant: None,
+                    install_path: path,
+                    config_path,
+                    port: default_port,
+                    status: ServiceStatus::Stopped,
+                    auto_start: false,
+                    origin: ServiceOrigin::PhpStudy,
+                });
             }
         }
     }

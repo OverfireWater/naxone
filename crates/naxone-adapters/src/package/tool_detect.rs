@@ -314,7 +314,30 @@ pub fn read_mysql_root_password(install_path: &Path) -> String {
 }
 
 pub fn write_mysql_root_password(install_path: &Path, pwd: &str) -> std::io::Result<()> {
-    std::fs::write(install_path.join(".naxone-root.txt"), pwd.as_bytes())
+    let path = install_path.join(".naxone-root.txt");
+    std::fs::write(&path, pwd.as_bytes())?;
+    // 限制 ACL：只允许当前用户读写，移除继承权限。屏蔽同机其他账户读取。
+    #[cfg(target_os = "windows")]
+    restrict_file_acl_owner_only(&path);
+    Ok(())
+}
+
+/// 用 icacls 把文件 ACL 收紧到「只 owner 可读写」+ 取消继承。失败静默（最坏情况只是没收紧权限）。
+#[cfg(target_os = "windows")]
+fn restrict_file_acl_owner_only(path: &Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let username = std::env::var("USERNAME").unwrap_or_default();
+    if username.is_empty() {
+        return;
+    }
+    let _ = std::process::Command::new("icacls")
+        .arg(path)
+        .arg("/inheritance:r")
+        .arg("/grant:r")
+        .arg(format!("{}:(R,W)", username))
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 }
 
 /// 通过运行中的 mysqld 改 root 密码。前置：mysqld 必须已启动且 current_pwd 正确。
@@ -338,26 +361,51 @@ pub fn change_mysql_root_password(
         if !mysql_exe.is_file() {
             return Err(format!("找不到 {}", mysql_exe.display()));
         }
-        // 转义 SQL 单引号
-        let escaped = new_pwd.replace('\'', "''");
+
+        // SQL 字符串字面量转义：先 \\ 再 ' → 以免后转义被前转义重复加工
+        let sql_escape = |s: &str| s.replace('\\', "\\\\").replace('\'', "''");
+        let new_pwd_sql = sql_escape(new_pwd);
         let sql = format!(
             "ALTER USER 'root'@'localhost' IDENTIFIED BY '{}'; FLUSH PRIVILEGES;",
-            escaped
+            new_pwd_sql
         );
+
+        // 把当前密码写到临时 my.cnf，不要走命令行 -p（避免在 tasklist /v 中暴露）
+        // 选项文件双引号字符串：\\ 和 \" 转义
+        let opt_escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let cnf_path = std::env::temp_dir().join(format!(
+            "naxone-mysql-{}-{}.cnf",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let cnf_content = format!(
+            "[client]\nuser=root\npassword=\"{}\"\n",
+            opt_escape(current_pwd)
+        );
+        if let Err(e) = std::fs::write(&cnf_path, cnf_content.as_bytes()) {
+            return Err(format!("写临时凭据文件失败: {}", e));
+        }
+
         let mut cmd = std::process::Command::new(&mysql_exe);
         cmd.args([
+            format!("--defaults-extra-file={}", cnf_path.display()).as_str(),
             format!("-P{}", port).as_str(),
             "-h127.0.0.1",
-            "-uroot",
-            format!("-p{}", current_pwd).as_str(),
             "--protocol=TCP",
             "-e",
             sql.as_str(),
         ]);
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let out = cmd
-            .output()
-            .map_err(|e| format!("调用 mysql.exe 失败: {}", e))?;
+        let out = cmd.output();
+
+        // 用完先覆写再删，减少残留可读性
+        let _ = std::fs::write(&cnf_path, vec![0u8; cnf_content.len()]);
+        let _ = std::fs::remove_file(&cnf_path);
+
+        let out = out.map_err(|e| format!("调用 mysql.exe 失败: {}", e))?;
         if out.status.success() {
             Ok(())
         } else {

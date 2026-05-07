@@ -7,6 +7,23 @@ use naxone_core::error::NaxOneError;
 
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
+/// 不可预测 token：基于 pid + 纳秒时间 + 栈地址三者混合 + 多轮 wrapping_mul。
+/// 不是密码学安全的随机数，但同机其它账户毫秒级猜测窗口足够小。
+fn unpredictable_token() -> String {
+    let pid = std::process::id() as u64;
+    let nano = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let stack_addr = (&pid as *const _) as usize as u64;
+    let mut x = pid ^ nano.rotate_left(13) ^ stack_addr.rotate_left(7);
+    for _ in 0..4 {
+        x = x.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(31);
+        x ^= nano.rotate_right(17);
+    }
+    format!("{:016x}", x)
+}
+
 fn read_hosts_bytes(path: &std::path::Path) -> Result<(String, bool), NaxOneError> {
     let bytes = std::fs::read(path)
         .map_err(|e| NaxOneError::from_io_with_context(e, "读取 hosts 文件失败"))?;
@@ -89,12 +106,28 @@ pub async fn save_hosts_text_elevated(text: String, state: State<'_, AppState>) 
     let normalized = normalize_hosts_text(&text);
 
     let temp_dir = std::env::temp_dir();
-    let stamp = format!("{}-{}", std::process::id(), chrono::Local::now().timestamp_millis());
-    let temp_path = temp_dir.join(format!("naxone-hosts-{}.txt", stamp));
-    let script_path = temp_dir.join(format!("naxone-hosts-{}.ps1", stamp));
+    // 不可预测的 token，避免同机其它账户在窗口期内推测路径读 hosts 中转文件。
+    let token = unpredictable_token();
+    let temp_path = temp_dir.join(format!("naxone-hosts-{}.txt", token));
+    let script_path = temp_dir.join(format!("naxone-hosts-{}.ps1", token));
 
     std::fs::write(&temp_path, normalized.as_bytes())
         .map_err(|e| format!("写入临时文本失败: {}", e))?;
+    // 收紧权限：仅当前用户可读（如失败静默——最坏只是未限制，文件本就只是 hosts 文本副本）
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let username = std::env::var("USERNAME").unwrap_or_default();
+        if !username.is_empty() {
+            let _ = std::process::Command::new("icacls")
+                .arg(&temp_path)
+                .arg("/inheritance:r")
+                .arg("/grant:r")
+                .arg(format!("{}:(R,W)", username))
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+        }
+    }
 
     let host_path_str = path.display().to_string().replace('"', "``\"");
     let src_path_str = temp_path.display().to_string().replace('"', "``\"");

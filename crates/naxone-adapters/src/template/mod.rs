@@ -1,5 +1,5 @@
 use naxone_core::domain::vhost::VirtualHost;
-use naxone_core::error::Result;
+use naxone_core::error::{NaxOneError, Result};
 use naxone_core::ports::template::TemplateEngine;
 
 /// Template engine using format strings, matching PHPStudy's exact config format
@@ -13,6 +13,7 @@ impl SimpleTemplateEngine {
 
 impl TemplateEngine for SimpleTemplateEngine {
     fn render_nginx_vhost(&self, vhost: &VirtualHost) -> Result<String> {
+        vhost.validate().map_err(NaxOneError::Template)?;
         let port = vhost.listen_port;
         let domain = &vhost.server_name;
         let doc_root = Self::to_forward_slash(&vhost.document_root);
@@ -102,6 +103,7 @@ impl TemplateEngine for SimpleTemplateEngine {
     }
 
     fn render_apache_vhost(&self, vhost: &VirtualHost) -> Result<String> {
+        vhost.validate().map_err(NaxOneError::Template)?;
         let port = vhost.listen_port;
         let domain = &vhost.server_name;
         let doc_root = Self::to_forward_slash(&vhost.document_root);

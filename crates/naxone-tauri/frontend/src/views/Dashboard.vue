@@ -97,7 +97,7 @@ function fmtUptime(s: number): string {
 interface GlobalPhpInfo { version: string | null; bin_dir: string; path_registered: boolean; conflicts: string[]; }
 const globalPhp = ref<GlobalPhpInfo>({ version: null, bin_dir: "", path_registered: false, conflicts: [] });
 
-import { toast } from "../composables/useToast";
+import { toast, friendlyError } from "../composables/useToast";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 const busyIds = ref<Set<string>>(new Set());
 const recentLogs = ref<LogEntry[]>([]);
@@ -196,10 +196,10 @@ const anyRunning = computed(() => services.value.some(isRunning));
 function isRunning(s: ServiceInfo): boolean { return s.status.state === "Running"; }
 function isBusy(id: string): boolean { return busyIds.value.has(id); }
 function originBadge(s: ServiceInfo): { text: string; color: string } | null {
-  if (s.origin === "phpstudy") return { text: "PS", color: "#8b5cf6" };
-  if (s.origin === "manual") return { text: "独立", color: "#06b6d4" };
-  if (s.origin === "store") return { text: "NX", color: "#22c55e" };
-  if (s.origin === "system") return { text: "系统", color: "#f59e0b" };
+  if (s.origin === "phpstudy") return { text: "PS", color: "var(--color-purple)" };
+  if (s.origin === "manual") return { text: "独立", color: "var(--color-cyan)" };
+  if (s.origin === "store") return { text: "NX", color: "var(--color-success)" };
+  if (s.origin === "system") return { text: "系统", color: "var(--color-accent)" };
   return null;
 }
 
@@ -207,8 +207,8 @@ function kindLabel(kind: string): string {
   return ({ nginx: "Nginx", apache: "Apache", mysql: "MySQL", redis: "Redis" } as Record<string, string>)[kind] || kind;
 }
 
-function showError(msg: string) {
-  toast.error(String(msg));
+function showError(msg: unknown) {
+  toast.error(friendlyError(msg));
 }
 
 function pauseAutoRefresh() { pauseUntil = Date.now() + 5000; }
@@ -392,7 +392,7 @@ function levelColor(level: string): string {
     debug: "var(--text-muted)",
     info: "var(--color-blue-light)",
     success: "var(--color-success-light)",
-    warn: "#eab308",
+    warn: "var(--color-yellow)",
     error: "var(--color-danger)",
   } as Record<string, string>)[level] || "var(--text-muted)";
 }
@@ -497,7 +497,7 @@ onUnmounted(() => {
       </div>
       <div class="grid grid-cols-2 gap-3 max-w-[560px] mx-auto">
         <button class="cta-card" @click="router.push('/store')">
-          <Store :size="18" class="mb-2" style="color: #a855f7" />
+          <Store :size="18" class="mb-2" style="color: var(--color-purple)" />
           <span class="font-semibold text-[16px] mb-0.5">打开软件商店</span>
           <span class="text-[13px]" style="color: var(--text-muted)">一键安装 Nginx / MySQL / PHP / Redis</span>
         </button>

@@ -183,17 +183,21 @@ fn main() {
 
                     for (idx, svc) in snapshot.iter().enumerate() {
                         let kind_name = svc.kind.display_name().to_lowercase();
-                        if !auto_start.iter().any(|a| kind_name.contains(a)) {
+                        // 精确匹配：避免 "php" 匹中 "phpstudy" 等其它名
+                        if !auto_start.iter().any(|a| kind_name == a.to_lowercase()) {
                             continue;
                         }
 
                         let mut target = svc.clone();
-                        // 先刷状态：端口已被占（如 PHPStudy 自启）时跳过，不重复启动
+                        // 先刷状态：端口已被自家进程占（如 PHPStudy 自启同款 nginx）时跳过，不重复启动。
+                        // 注意：refresh_status 应已通过 exe path 区分自家 vs 陌生进程；
+                        // 这里只信任 is_running 结果即可。日志降到 debug 级，避免与后续
+                        // start 失败时的"端口被外部占用"warn 在用户眼里同时出现造成困惑。
                         let _ = service_manager.refresh_status(&mut target).await;
                         if target.status.is_running() {
-                            tracing::info!(
+                            tracing::debug!(
                                 service = target.kind.display_name(),
-                                "自动启动跳过：已在运行"
+                                "auto_start: 已在运行，跳过"
                             );
                             // 把刷新后的 status 同步回 shared services
                             if let Some(s) = services.write().await.iter_mut().find(|s| s.id() == target.id()) {

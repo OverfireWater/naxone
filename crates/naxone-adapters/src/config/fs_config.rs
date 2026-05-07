@@ -17,8 +17,17 @@ impl ConfigIO for FsConfigIO {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(path, content).map_err(|e| {
-            NaxOneError::Config(format!("Failed to write {}: {}", path.display(), e))
+        // 原子写：先写到同目录的 .tmp，写完再 rename 覆盖原文件。
+        // 优势：写入中途崩溃不会留下"半个"配置文件；rename 在同一卷上是原子的。
+        let tmp = path.with_extension("naxone.tmp");
+        std::fs::write(&tmp, content).map_err(|e| {
+            NaxOneError::Config(format!("Failed to write tmp {}: {}", tmp.display(), e))
+        })?;
+        // Windows 上 rename 到已存在文件需要 std::fs::rename 即可（原子覆盖）
+        std::fs::rename(&tmp, path).map_err(|e| {
+            // 失败时清理 tmp，避免遗留
+            let _ = std::fs::remove_file(&tmp);
+            NaxOneError::Config(format!("Failed to rename {} -> {}: {}", tmp.display(), path.display(), e))
         })
     }
 

@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from "vue";
 import { ChevronDown } from "lucide-vue-next";
 
 export interface SelectOption {
@@ -95,7 +95,30 @@ function onViewportChange() {
   if (open.value) updateMenuPosition();
 }
 
-window.addEventListener("rs-select-open", onSiblingOpen);
+// 父页面被 <KeepAlive> 缓存时 onUnmount 不会触发；改用 onActivated/onDeactivated
+// 配对处理 rs-select-open 全局监听，避免每次切换菜单都累加一份。
+function attachSiblingListener() {
+  window.addEventListener("rs-select-open", onSiblingOpen);
+}
+function detachSiblingListener() {
+  window.removeEventListener("rs-select-open", onSiblingOpen);
+}
+function detachOpenListeners() {
+  window.removeEventListener("click", onWindowClick);
+  window.removeEventListener("resize", onViewportChange);
+  window.removeEventListener("scroll", onViewportChange, true);
+}
+
+attachSiblingListener();
+onActivated(attachSiblingListener);
+onDeactivated(() => {
+  detachSiblingListener();
+  // 切走时若菜单还开着，关掉避免 click/resize/scroll 监听残留
+  if (open.value) {
+    open.value = false;
+    detachOpenListeners();
+  }
+});
 
 watch(open, (value) => {
   if (value) {
@@ -103,17 +126,13 @@ watch(open, (value) => {
     window.addEventListener("resize", onViewportChange);
     window.addEventListener("scroll", onViewportChange, true);
   } else {
-    window.removeEventListener("click", onWindowClick);
-    window.removeEventListener("resize", onViewportChange);
-    window.removeEventListener("scroll", onViewportChange, true);
+    detachOpenListeners();
   }
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener("rs-select-open", onSiblingOpen);
-  window.removeEventListener("click", onWindowClick);
-  window.removeEventListener("resize", onViewportChange);
-  window.removeEventListener("scroll", onViewportChange, true);
+  detachSiblingListener();
+  detachOpenListeners();
 });
 </script>
 
@@ -125,13 +144,19 @@ onBeforeUnmount(() => {
       class="rs-select-trigger"
       :class="[{ 'w-full': fullWidth, disabled }, triggerClass]"
       :disabled="disabled"
+      :aria-haspopup="'listbox'"
+      :aria-expanded="open"
+      :aria-label="placeholder"
       @click.stop="toggle"
+      @keydown.enter.prevent="toggle"
+      @keydown.space.prevent="toggle"
+      @keydown.escape="close"
     >
       <span class="truncate">{{ displayLabel }}</span>
       <ChevronDown :size="12" class="shrink-0 transition-transform" :class="{ 'rotate-180': open }" />
     </button>
     <Teleport to="body">
-      <div v-if="open" class="rs-select-menu" :class="menuClass" :style="menuStyle" @click.stop>
+      <div v-if="open" class="rs-select-menu" :class="menuClass" :style="menuStyle" role="listbox" @click.stop @keydown.escape="close">
         <button
           v-for="option in options"
           :key="`${option.label}-${String(option.value)}`"
@@ -139,7 +164,10 @@ onBeforeUnmount(() => {
           class="rs-select-option"
           :class="{ active: Object.is(option.value, modelValue), disabled: option.disabled }"
           :disabled="option.disabled"
+          role="option"
+          :aria-selected="Object.is(option.value, modelValue)"
           @click.stop="selectOption(option)"
+          @keydown.enter.prevent="selectOption(option)"
         >
           {{ option.label }}
         </button>
