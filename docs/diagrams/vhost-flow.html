@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>NaxOne · 虚拟主机双写流程</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 50%, #f0fdff 100%);
+    padding: 56px 80px;
+    width: 1400px;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1.title {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    font-size: 16px;
+    color: #64748b;
+    margin-bottom: 40px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+  .row-single { display: block; }
+  .step {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1.5px solid;
+    border-radius: 18px;
+    padding: 22px 26px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  }
+  .step-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .step-icon {
+    flex-shrink: 0;
+    width: 38px; height: 38px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+  }
+  .step-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+  }
+  .step-desc {
+    font-size: 13.5px;
+    color: #475569;
+    line-height: 1.7;
+  }
+  .step-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  .arrow {
+    text-align: center;
+    margin: 4px 0;
+    color: #cbd5e1;
+    font-size: 22px;
+    letter-spacing: 8px;
+  }
+  .arrow-cross {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    text-align: center;
+    color: #cbd5e1;
+    font-size: 22px;
+    margin: 4px 0;
+  }
+
+  /* 校验阶段：紫色调 */
+  .step.validate { border-color: #c7d2fe; background: linear-gradient(135deg, rgba(238, 242, 255, 0.85), rgba(245, 243, 255, 0.85)); }
+  .step.validate .step-icon { background: #e0e7ff; color: #4338ca; }
+  /* 拒绝阶段：红色调 */
+  .step.reject { border-color: #fecaca; background: linear-gradient(135deg, rgba(254, 242, 242, 0.85), rgba(255, 247, 237, 0.85)); }
+  .step.reject .step-icon { background: #fee2e2; color: #b91c1c; }
+  .step.reject .step-tag { background: #fee2e2; color: #b91c1c; }
+  /* 写入阶段：蓝色调 */
+  .step.write { border-color: #bae6fd; background: linear-gradient(135deg, rgba(240, 249, 255, 0.85), rgba(245, 252, 255, 0.85)); }
+  .step.write .step-icon { background: #e0f2fe; color: #0369a1; }
+  .step.write .step-tag { background: #dbeafe; color: #1e40af; }
+  /* 完成阶段：绿色调 */
+  .step.done { border-color: #86efac; background: linear-gradient(135deg, rgba(240, 253, 244, 0.95), rgba(247, 254, 231, 0.95)); }
+  .step.done .step-icon { background: #dcfce7; color: #15803d; }
+  .step.done .step-tag { background: #d1fae5; color: #047857; }
+  .step.done .step-title { color: #15803d; }
+  /* hosts/reload */
+  .step.system { border-color: #fed7aa; background: linear-gradient(135deg, rgba(255, 247, 237, 0.85), rgba(254, 252, 232, 0.85)); }
+  .step.system .step-icon { background: #ffedd5; color: #c2410c; }
+  .step.system .step-tag { background: #ffedd5; color: #c2410c; }
+
+  .footer {
+    margin-top: 40px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<h1 class="title">NaxOne · 虚拟主机双写流程</h1>
+<p class="subtitle">表单提交 → 双层注入校验 → Nginx + Apache 配置同步 → hosts 写入 → reload</p>
+
+<div class="row row-single">
+  <div class="step validate">
+    <div class="step-head">
+      <div class="step-icon">📝</div>
+      <div class="step-title">用户提交表单<span class="step-tag" style="background:#e0e7ff;color:#4338ca;">START</span></div>
+    </div>
+    <div class="step-desc">CreateVhostRequest（server_name / aliases / port / document_root / php_version / ssl / rewrite_rule / custom_directives ...）</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="row">
+  <div class="step validate">
+    <div class="step-head"><div class="step-icon">🛡</div><div class="step-title">vhost.validate()</div></div>
+    <div class="step-desc">域名 / 别名格式校验（hostname 字符）<br/>index_files / access_log 单行字段（无 ; { }）<br/>custom_directives 花括号配对、拒绝 server { 顶层块</div>
+  </div>
+  <div class="step validate">
+    <div class="step-head"><div class="step-icon">📂</div><div class="step-title">validate_document_root()</div></div>
+    <div class="step-desc">必须是绝对路径<br/>禁止指向系统目录（C:\Windows、Program Files 等）<br/>config_filename 用 sanitize_filename 防路径穿越</div>
+  </div>
+</div>
+<div class="arrow-cross">
+  <div>✗ 不合法 → ❌</div>
+  <div>✗ 系统路径 → ❌</div>
+</div>
+
+<div class="row">
+  <div class="step reject">
+    <div class="step-head"><div class="step-icon">🚫</div><div class="step-title">注入防护拒绝<span class="step-tag">HIGH-1</span></div></div>
+    <div class="step-desc">含 ; / 换行 / 大括号 → 错误：「域名格式不合法：xxx」<br/>用户在前端看到 friendlyError 翻译后的可读消息</div>
+  </div>
+  <div class="step reject">
+    <div class="step-head"><div class="step-icon">🚫</div><div class="step-title">系统目录保护<span class="step-tag">HIGH-2</span></div></div>
+    <div class="step-desc">document_root 指向 C:\Windows 等 → 拒绝：「不允许将网站目录设在系统路径下」</div>
+  </div>
+</div>
+
+<div class="arrow">▼ 全部通过</div>
+
+<div class="row">
+  <div class="step write">
+    <div class="step-head"><div class="step-icon">📄</div><div class="step-title">写 Nginx vhost.conf<span class="step-tag">Atomic</span></div></div>
+    <div class="step-desc">SimpleTemplateEngine 渲染 → tempfile + rename 原子替换 → 失败回滚已写入。生成 .bak 备份。</div>
+  </div>
+  <div class="step write">
+    <div class="step-head"><div class="step-icon">📄</div><div class="step-title">写 Apache vhost.conf<span class="step-tag">Dual-write</span></div></div>
+    <div class="step-desc">同样模板引擎渲染 Apache 格式 → 原子写。任一边失败时回滚另一边，保证 Nginx 和 Apache 配置始终一致。</div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<div class="row">
+  <div class="step system">
+    <div class="step-head"><div class="step-icon">🌐</div><div class="step-title">写 Windows hosts 文件<span class="step-tag">UAC</span></div></div>
+    <div class="step-desc">追加 127.0.0.1 example.test 到 C:\Windows\System32\drivers\etc\hosts。普通权限会弹 UAC，临时 ps1 文件用不可预测 token + ACL 收紧。</div>
+  </div>
+  <div class="step system">
+    <div class="step-head"><div class="step-icon">🔄</div><div class="step-title">Reload Nginx / Apache<span class="step-tag">if running</span></div></div>
+    <div class="step-desc">如 Web 服务器在跑：先 nginx -t 校验配置 → reload。配置错误时回滚所有改动（vhost.conf + hosts）。</div>
+  </div>
+</div>
+
+<div class="arrow">▼ 全部成功</div>
+
+<div class="row row-single">
+  <div class="step done">
+    <div class="step-head">
+      <div class="step-icon">✅</div>
+      <div class="step-title">站点创建完成<span class="step-tag">DONE</span></div>
+    </div>
+    <div class="step-desc">前端列表新增条目 · Toast 通知「站点已创建，已自动 reload」 · emit services-changed 让其他页面刷新</div>
+  </div>
+</div>
+
+<div class="footer">NaxOne · VhostManager.create_vhost()</div>
+
+</body>
+</html>

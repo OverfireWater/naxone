@@ -71,20 +71,16 @@ Requires Windows 10 1809+ / Windows 11, x64.
 
 ### First run: Windows SmartScreen warning
 
-**This is expected.** NaxOne does not currently ship with a commercial code-signing certificate (annual fee ¥1000+ / $150+). The first time you run it, Windows shows:
+The first time you run it, Windows may show:
 
 > Windows protected your PC
 > Microsoft Defender SmartScreen prevented an unrecognized app from starting…
 
-**How to bypass** (any of):
+How to bypass (any of):
 
-1. **From the installer popup**: click **More info** → **Run anyway**
-2. **From an .exe file**: right-click → **Properties** → check **Unblock** at the bottom → OK, then double-click as usual
-3. **PowerShell**: `Unblock-File -Path "D:\NaxOne\NaxOne.exe"`
-
-**Why no signature?** Self-signed certificates are still blocked by SmartScreen. OV commercial certificates ($150+/yr) are also still blocked initially (you must "earn reputation" via downloads). Only EV certificates ($300+/yr with a USB token) are trusted instantly. As an open-source project we haven't invested yet — the source is fully public, you can audit and self-build.
-
-We plan to apply for [SignPath Foundation](https://signpath.org/)'s free OSS code-signing service (used by Stellarium / Flameshot / GitExtensions) once the project gains some traction.
+1. In the popup click **More info** → **Run anyway**
+2. Right-click the .exe → **Properties** → check **Unblock** → OK
+3. PowerShell: `Unblock-File -Path "D:\NaxOne\NaxOne.exe"`
 
 ## Build from source
 
@@ -122,38 +118,7 @@ cargo test --workspace
 
 **Hexagonal architecture** (Ports & Adapters) — core business logic is fully decoupled from external dependencies.
 
-```mermaid
-flowchart TB
-    UI["🖥️ Frontend · Vue 3 + Vite + Tailwind<br/>views/ · components/ · custom title bar"]
-    UI -->|"Tauri invoke()"| TAURI
-
-    subgraph TAURI ["📦 naxone-tauri · IPC bridge + app state"]
-      direction LR
-      CMD["commands/<br/>service · vhost · php · settings · package · updater"]
-      STATE["state.rs<br/>AppState · config loading · legacy migration"]
-    end
-
-    TAURI --> CORE
-    subgraph CORE ["🔷 naxone-core · domain + use cases (zero external deps)"]
-      direction LR
-      DOMAIN["domain/<br/>Service · VirtualHost · PHP · Log"]
-      USECASE["use_cases/<br/>ServiceManager · VhostManager · PhpManager"]
-      PORTS["ports/<br/>ProcessManager · ConfigIO · TemplateEngine · PlatformOps"]
-    end
-
-    CORE -.implements.-> ADAPTERS
-    subgraph ADAPTERS ["🔧 naxone-adapters · port implementations (platform-specific)"]
-      direction LR
-      PROC["NativeProcessManager<br/>start/stop · port probing · PID tracking"]
-      CFG["FsConfigIO<br/>atomic write · .bak backup"]
-      TPL["SimpleTemplateEngine<br/>nginx/apache vhost render + injection guard"]
-      PLAT["WindowsPlatform / LinuxPlatform<br/>hosts · self-signed SSL · global PHP shim"]
-      SCAN["PackageScanner<br/>PHPStudy scan + software store"]
-    end
-
-    ADAPTERS --> WIN["🪟 Windows API<br/>WMI · netsh · icacls · UAC elevate"]
-    ADAPTERS --> NET["🌐 reqwest<br/>package download + sha256 verify"]
-```
+![Architecture](docs/diagrams/architecture.png)
 
 - **`naxone-core`**: Pure domain logic, zero external deps, fully unit-testable.
 - **`naxone-adapters`**: Implements the port traits defined in core, swappable (a future Linux TUI just replaces this layer).
@@ -161,62 +126,11 @@ flowchart TB
 
 ### Service start flow (with mutex + cascade)
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant UI as Frontend
-    participant CMD as Tauri Command
-    participant SM as ServiceManager
-    participant PM as ProcessManager
-    participant FS as Filesystem
-
-    User->>UI: Click "Start Nginx"
-    UI->>CMD: invoke("start_service", id)
-    CMD->>SM: start_with_deps(target, others)
-
-    Note over SM: 1. Mutex
-    SM->>PM: Is Apache running?
-    alt Apache running
-        SM->>PM: stop(Apache)
-    end
-
-    Note over SM: 2. Start target
-    SM->>PM: spawn(nginx.exe)
-    PM->>FS: Read + validate nginx.conf
-    PM-->>SM: PID + status
-
-    Note over SM: 3. Cascade PHP-CGI
-    loop For each not-running PHP instance
-        SM->>PM: spawn(php-cgi.exe -b :port)
-        PM-->>SM: PID
-    end
-
-    SM-->>CMD: services array (all changes)
-    CMD-->>UI: emit "services-changed"
-    UI->>User: Toast "Started Nginx + 3 PHP-CGI"
-```
+![Service flow](docs/diagrams/service-flow.png)
 
 ### Vhost dual-write flow (Nginx + Apache in sync)
 
-```mermaid
-flowchart LR
-    A["User submits form"] --> B{"vhost.validate()"}
-    B -->|"contains ; or path traversal"| Z1["❌ Reject<br/>Injection guard"]
-    B -->|"pass"| C{"validate_document_root"}
-    C -->|"points to C:\Windows"| Z2["❌ Reject<br/>System dir guard"]
-    C -->|"pass"| D["build_vhost"]
-
-    D --> E["Write Nginx vhost conf<br/>(atomic tempfile + rename)"]
-    E -->|"fail"| R1["Rollback"]
-    E -->|"ok"| F["Write Apache vhost conf"]
-    F -->|"fail"| R2["Rollback Nginx"]
-    F -->|"ok"| G["Update hosts file"]
-    G --> H{"Web server running?"}
-    H -->|"yes"| I["nginx -t + reload"]
-    I -->|"config error"| R3["Roll back all"]
-    I -->|"ok"| J["✅ Done"]
-    H -->|"no"| J
-```
+![Vhost flow](docs/diagrams/vhost-flow.png)
 
 ## Project layout
 

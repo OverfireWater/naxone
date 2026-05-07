@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>NaxOne · 服务启动流程</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 50%, #f0fdff 100%);
+    padding: 56px 80px;
+    width: 1400px;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1.title {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  .subtitle {
+    font-size: 16px;
+    color: #64748b;
+    margin-bottom: 40px;
+  }
+  .step {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1.5px solid #e2e8f0;
+    border-radius: 20px;
+    padding: 24px 32px;
+    margin-bottom: 18px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 48px; height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+  }
+  .step-body { flex: 1; min-width: 0; }
+  .step-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .step-actor {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 8px;
+    background: #e0e7ff;
+    color: #4338ca;
+  }
+  .step-desc {
+    font-size: 14px;
+    color: #475569;
+    line-height: 1.7;
+    margin-bottom: 12px;
+  }
+  .step-detail {
+    background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+    border-radius: 12px;
+    padding: 14px 18px;
+    border-left: 3px solid #6366f1;
+    font-size: 13px;
+    color: #475569;
+    line-height: 1.7;
+  }
+  .step-detail code {
+    background: rgba(99, 102, 241, 0.1);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    color: #4338ca;
+    font-size: 12.5px;
+  }
+  .arrow {
+    text-align: center;
+    margin: -2px 0 6px;
+    color: #cbd5e1;
+    font-size: 22px;
+    letter-spacing: 8px;
+  }
+  /* Color accents */
+  .step.user .step-num { background: linear-gradient(135deg, #3b82f6, #6366f1); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
+  .step.user .step-actor { background: #dbeafe; color: #1e40af; }
+  .step.front .step-num { background: linear-gradient(135deg, #ec4899, #8b5cf6); box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3); }
+  .step.front .step-actor { background: #fce7f3; color: #be185d; }
+  .step.tauri .step-num { background: linear-gradient(135deg, #f59e0b, #ef4444); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3); }
+  .step.tauri .step-actor { background: #fef3c7; color: #b45309; }
+  .step.core .step-num { background: linear-gradient(135deg, #06b6d4, #0284c7); box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3); }
+  .step.core .step-actor { background: #cffafe; color: #0e7490; }
+  .step.adapter .step-num { background: linear-gradient(135deg, #22c55e, #14b8a6); box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3); }
+  .step.adapter .step-actor { background: #d1fae5; color: #047857; }
+
+  .footer {
+    margin-top: 40px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<h1 class="title">NaxOne · 服务启动流程</h1>
+<p class="subtitle">用户点击「启动 Nginx」 → Nginx/Apache 互斥处理 → PHP-CGI 联动启动 → 状态广播</p>
+
+<div class="step user">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <div class="step-title">用户操作 <span class="step-actor">User</span></div>
+    <div class="step-desc">在仪表板点击 Nginx 卡片的 ▶ 启动按钮（或点 svc-toggle 滑块）。</div>
+    <div class="step-detail">UI 立刻把按钮置 <code>busy</code>，禁用重复点击；<code>pauseAutoRefresh()</code> 暂停 5s 状态轮询，避免显示中间态。</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="step front">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <div class="step-title">前端发起 IPC 调用 <span class="step-actor">Vue 3</span></div>
+    <div class="step-desc">Dashboard.vue 调 <code style="background:rgba(190,24,93,0.1);color:#be185d;padding:1px 6px;border-radius:4px;">invoke("start_service", { id })</code> 进入 Tauri Command 层。</div>
+    <div class="step-detail">10s 超时保护（<code>invokeWithTimeout</code>）；失败时 <code>friendlyError()</code> 把后端错误翻译成人话 toast。</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="step tauri">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <div class="step-title">Tauri Command 进入 ServiceManager <span class="step-actor">naxone-tauri</span></div>
+    <div class="step-desc">commands/service.rs 拿到 AppState，把 target 和 others（同 kind 其他实例）传给 <code>service_manager.start_with_deps()</code>。</div>
+    <div class="step-detail">写 push_log 进 NaxOne 自己的活动日志（前端可见）；同时 emit <code>services-changed</code> 让其他页面刷新。</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="step core">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <div class="step-title">互斥处理：先停 Apache <span class="step-actor">naxone-core</span></div>
+    <div class="step-desc">ServiceManager 检查 others 中是否有运行中的 Apache（与 Nginx 共享 80 端口）。如有，<b>先 stop 再 start</b>。</div>
+    <div class="step-detail">同 kind 多版本（如 PHPStudy 自带 Nginx 1.15 + Store 装的 1.25）也要停掉非 target 的版本，避免端口抢占。</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="step adapter">
+  <div class="step-num">5</div>
+  <div class="step-body">
+    <div class="step-title">Spawn nginx.exe + 校验配置 <span class="step-actor">NativeProcessManager</span></div>
+    <div class="step-desc">用 tokio::process::Command spawn，<code>creation_flags(CREATE_NO_WINDOW)</code> 不弹黑框；启动后 500ms 试 <code>try_wait()</code>，若已退出则读 stderr 报具体错。</div>
+    <div class="step-detail">PID 失败兜底：<code>child.id()</code> 拿不到时降级用 netstat 反查端口对应进程。状态同步写到 status_cache，前端拉新值。</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="step core">
+  <div class="step-num">6</div>
+  <div class="step-body">
+    <div class="step-title">联动启动 PHP-CGI <span class="step-actor">naxone-core</span></div>
+    <div class="step-desc">遍历 others 中所有 PHP 实例，未运行的挨个 spawn（每个独立端口 9001/9002/...），并启 watchdog 监听崩溃自动重启。</div>
+    <div class="step-detail">watchdog 加了 backoff（2s→4s→8s→16s→32s），超过 5 次崩溃停止重启避免死循环。</div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="step front">
+  <div class="step-num">7</div>
+  <div class="step-body">
+    <div class="step-title">回调前端 + Toast 通知 <span class="step-actor">Vue 3</span></div>
+    <div class="step-desc">Command 返回最新 services 数组（含 Nginx + 联动起来的 PHP-CGI 状态）。前端 splice 更新本地 ref，<code>toast.success("已启动 Nginx + 3 个 PHP-CGI")</code>。</div>
+    <div class="step-detail">5s 后 svcTimer 自动 refresh 一次状态，确认 PID/内存数据是最新的。</div>
+  </div>
+</div>
+
+<div class="footer">NaxOne · ServiceManager.start_with_deps()</div>
+
+</body>
+</html>

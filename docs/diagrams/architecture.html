@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>NaxOne · 整体架构</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 50%, #f0fdff 100%);
+    padding: 56px 80px;
+    width: 1400px;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1.title {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  .subtitle {
+    font-size: 16px;
+    color: #64748b;
+    margin-bottom: 40px;
+  }
+  .layer {
+    background: rgba(255, 255, 255, 0.7);
+    border: 1.5px solid;
+    border-radius: 24px;
+    padding: 28px 36px;
+    margin-bottom: 24px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+    position: relative;
+  }
+  .layer-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .layer-icon {
+    width: 40px; height: 40px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+  }
+  .layer-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1e293b;
+  }
+  .layer-desc {
+    font-size: 13px;
+    color: #64748b;
+    margin-top: 2px;
+  }
+  .cards {
+    display: grid;
+    gap: 16px;
+  }
+  .card {
+    background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
+    border-radius: 16px;
+    padding: 18px 22px;
+    border: 1px solid;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .card-icon {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+  .card-body { flex: 1; min-width: 0; }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 4px;
+  }
+  .card-desc {
+    font-size: 12.5px;
+    color: #64748b;
+    line-height: 1.55;
+  }
+  .arrow {
+    text-align: center;
+    margin: 4px 0;
+    color: #94a3b8;
+    font-size: 18px;
+    font-weight: 300;
+    letter-spacing: 8px;
+  }
+  /* Layer color schemes */
+  .layer-frontend { border-color: #c7d2fe; background: linear-gradient(135deg, rgba(238, 242, 255, 0.85), rgba(250, 245, 255, 0.85)); }
+  .layer-frontend .layer-icon { background: #e0e7ff; color: #4f46e5; }
+  .layer-frontend .card { border-color: #e0e7ff; }
+  .layer-frontend .card-icon { background: #e0e7ff; color: #4f46e5; }
+  .layer-tauri { border-color: #fbcfe8; background: linear-gradient(135deg, rgba(253, 242, 248, 0.85), rgba(255, 250, 245, 0.85)); }
+  .layer-tauri .layer-icon { background: #fce7f3; color: #be185d; }
+  .layer-tauri .card { border-color: #fce7f3; }
+  .layer-tauri .card-icon { background: #fce7f3; color: #be185d; }
+  .layer-core { border-color: #bae6fd; background: linear-gradient(135deg, rgba(240, 249, 255, 0.85), rgba(245, 252, 255, 0.85)); }
+  .layer-core .layer-icon { background: #e0f2fe; color: #0284c7; }
+  .layer-core .card { border-color: #e0f2fe; }
+  .layer-core .card-icon { background: #e0f2fe; color: #0284c7; }
+  .layer-adapters { border-color: #bbf7d0; background: linear-gradient(135deg, rgba(240, 253, 244, 0.85), rgba(247, 254, 231, 0.85)); }
+  .layer-adapters .layer-icon { background: #dcfce7; color: #15803d; }
+  .layer-adapters .card { border-color: #dcfce7; }
+  .layer-adapters .card-icon { background: #dcfce7; color: #15803d; }
+  .layer-platform { border-color: #fed7aa; background: linear-gradient(135deg, rgba(255, 247, 237, 0.85), rgba(254, 252, 232, 0.85)); }
+  .layer-platform .layer-icon { background: #ffedd5; color: #c2410c; }
+  .layer-platform .card { border-color: #ffedd5; }
+  .layer-platform .card-icon { background: #ffedd5; color: #c2410c; }
+
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+  .footer {
+    margin-top: 40px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 13px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #e0e7ff;
+    color: #4338ca;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<h1 class="title">NaxOne · 整体架构</h1>
+<p class="subtitle">六边形架构 (Hexagonal / Ports &amp; Adapters) · 核心业务逻辑与外部依赖完全解耦</p>
+
+<!-- 前端 -->
+<div class="layer layer-frontend">
+  <div class="layer-header">
+    <div class="layer-icon">🖥</div>
+    <div>
+      <div class="layer-title">前端 · Vue 3 + Vite + Tailwind <span class="badge">UI</span></div>
+      <div class="layer-desc">毛玻璃 UI · 自定义标题栏 · KeepAlive 路由 · 字号两档制 (16/13)</div>
+    </div>
+  </div>
+  <div class="cards grid-3">
+    <div class="card"><div class="card-icon">📊</div><div class="card-body"><div class="card-title">views/</div><div class="card-desc">Dashboard · Vhosts · Store · ServiceConfig · Settings · GlobalEnv</div></div></div>
+    <div class="card"><div class="card-icon">🧩</div><div class="card-body"><div class="card-title">components/</div><div class="card-desc">SelectMenu · LogDrawer · StoreCard · ToastContainer</div></div></div>
+    <div class="card"><div class="card-icon">⚙</div><div class="card-body"><div class="card-title">composables/</div><div class="card-desc">useToast · useTextareaTab · useAppInfo</div></div></div>
+  </div>
+</div>
+
+<div class="arrow">▼ Tauri invoke()</div>
+
+<!-- Tauri IPC -->
+<div class="layer layer-tauri">
+  <div class="layer-header">
+    <div class="layer-icon">📦</div>
+    <div>
+      <div class="layer-title">naxone-tauri · IPC 桥 + 应用状态 <span class="badge">Bridge</span></div>
+      <div class="layer-desc">把前端 invoke 转发给 Core 用例，注入 AppState 和 StateLock</div>
+    </div>
+  </div>
+  <div class="cards grid-2">
+    <div class="card"><div class="card-icon">📡</div><div class="card-body"><div class="card-title">commands/</div><div class="card-desc">service · vhost · php · settings · package · updater · hosts · strangers</div></div></div>
+    <div class="card"><div class="card-icon">💾</div><div class="card-body"><div class="card-title">state.rs</div><div class="card-desc">AppState · 配置加载 · 老用户 ~/.ruststudy 迁移 · 路径解析</div></div></div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- Core -->
+<div class="layer layer-core">
+  <div class="layer-header">
+    <div class="layer-icon">🔷</div>
+    <div>
+      <div class="layer-title">naxone-core · 域 + 用例 <span class="badge">Pure</span></div>
+      <div class="layer-desc">零外部依赖 · 100% 单元可测 · 跨平台共享</div>
+    </div>
+  </div>
+  <div class="cards grid-3">
+    <div class="card"><div class="card-icon">📐</div><div class="card-body"><div class="card-title">domain/</div><div class="card-desc">Service · VirtualHost · PHP · Log · 注入校验函数</div></div></div>
+    <div class="card"><div class="card-icon">🎯</div><div class="card-body"><div class="card-title">use_cases/</div><div class="card-desc">ServiceManager · VhostManager · PhpManager · ConfigEditor</div></div></div>
+    <div class="card"><div class="card-icon">🔌</div><div class="card-body"><div class="card-title">ports/</div><div class="card-desc">ProcessManager · ConfigIO · TemplateEngine · PlatformOps</div></div></div>
+  </div>
+</div>
+
+<div class="arrow">▼ implements traits</div>
+
+<!-- Adapters -->
+<div class="layer layer-adapters">
+  <div class="layer-header">
+    <div class="layer-icon">🔧</div>
+    <div>
+      <div class="layer-title">naxone-adapters · 端口实现 <span class="badge">Platform</span></div>
+      <div class="layer-desc">具体的进程管理 / 文件 IO / 模板渲染 / 平台 API · 平台相关</div>
+    </div>
+  </div>
+  <div class="cards grid-3">
+    <div class="card"><div class="card-icon">⚡</div><div class="card-body"><div class="card-title">NativeProcessManager</div><div class="card-desc">启停 · 端口探测 · PID 跟踪 · watchdog</div></div></div>
+    <div class="card"><div class="card-icon">📁</div><div class="card-body"><div class="card-title">FsConfigIO</div><div class="card-desc">原子写 (tempfile + rename) · .bak 备份</div></div></div>
+    <div class="card"><div class="card-icon">📝</div><div class="card-body"><div class="card-title">SimpleTemplateEngine</div><div class="card-desc">nginx / apache vhost 渲染 + 注入校验</div></div></div>
+    <div class="card"><div class="card-icon">🪟</div><div class="card-body"><div class="card-title">WindowsPlatform</div><div class="card-desc">hosts · UAC 提权 · 自签 SSL · icacls 权限</div></div></div>
+    <div class="card"><div class="card-icon">📦</div><div class="card-body"><div class="card-title">PackageScanner</div><div class="card-desc">PHPStudy 扫描 + 软件商店包安装 + sha256 校验</div></div></div>
+    <div class="card"><div class="card-icon">🌐</div><div class="card-body"><div class="card-title">reqwest + zip</div><div class="card-desc">远程包下载 · zip-slip 防护 · 镜像加速</div></div></div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- Platform -->
+<div class="layer layer-platform">
+  <div class="layer-header">
+    <div class="layer-icon">⚡</div>
+    <div>
+      <div class="layer-title">操作系统 · Windows API <span class="badge">OS</span></div>
+      <div class="layer-desc">底层调用：进程 / 文件 / 网络 / 权限</div>
+    </div>
+  </div>
+  <div class="cards grid-4">
+    <div class="card"><div class="card-icon">🔍</div><div class="card-body"><div class="card-title">WMI · netstat</div><div class="card-desc">PID 查询 · 端口监听</div></div></div>
+    <div class="card"><div class="card-icon">🛡</div><div class="card-body"><div class="card-title">icacls · DPAPI</div><div class="card-desc">文件 ACL · 凭据保护</div></div></div>
+    <div class="card"><div class="card-icon">🔥</div><div class="card-body"><div class="card-title">netsh</div><div class="card-desc">防火墙端口规则</div></div></div>
+    <div class="card"><div class="card-icon">🔑</div><div class="card-body"><div class="card-title">UAC · winreg</div><div class="card-desc">提权 · 用户 PATH</div></div></div>
+  </div>
+</div>
+
+<div class="footer">NaxOne v0.5.0 · MIT License · Rust + Tauri 2 + Vue 3</div>
+
+</body>
+</html>

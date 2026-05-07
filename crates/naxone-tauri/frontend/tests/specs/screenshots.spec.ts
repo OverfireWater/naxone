@@ -29,7 +29,13 @@ describe("📸 截图生成（docs/screenshots/）", () => {
     await waitForApp();
     // 设窗口尺寸固定，截图一致
     await browser.setWindowSize(1280, 820);
-    await browser.pause(500);
+    // 切到亮色主题（README 截图统一用亮色，更适合做文档展示）
+    await browser.execute(() => {
+      localStorage.setItem("naxone-theme", "light");
+      document.documentElement.setAttribute("data-theme", "light");
+      window.dispatchEvent(new CustomEvent("theme-change", { detail: "light" }));
+    });
+    await browser.pause(800);
   });
 
   it("01-dashboard 仪表板", async () => {
