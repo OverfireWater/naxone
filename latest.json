@@ -1,11 +1,11 @@
 {
-  "version": "v0.5.5",
-  "notes": "## NaxOne v0.5.5 — 修复更新检查 + OTA 全链路打通\n\n### 修复\n\n- **v0.5.3 / v0.5.4 看不到更新提醒**：旧的 `check_for_updates` 调 Gitee API 触发 403 限速，且 Gitee 不支持 `/releases/latest/download/X` 路径。现改用 plugin-updater 的 `check()` 直接拉静态 `latest.json`（双 endpoint：Gitee `raw/main/latest.json` + GitHub `releases/latest/download/latest.json`）。\n- **release_gitee.py 自动维护 main 分支根目录的 latest.json**，每次发版自动 commit + push，让 Gitee raw URL 始终指向最新版。\n\n### ⚠️ 重要：v0.5.3 / v0.5.4 用户需手动安装一次\n\n由于旧版本的更新检查代码已硬编码进 exe 且 Gitee API 限速，无法自动收到本次提醒。请：\n\n1. 从 [Gitee Release](https://gitee.com/kz_y/naxone/releases/tag/v0.5.5) 或 [GitHub Release](https://github.com/OverfireWater/naxone/releases/tag/v0.5.5) 下载 `NaxOne_0.5.5_x64-setup.exe`\n2. 直接覆盖安装（配置兼容）\n\n**装上 v0.5.5 之后所有未来版本都能 OTA 自动升级**，不再需要手动下载。\n",
-  "pub_date": "2026-05-07T10:20:28Z",
+  "version": "v0.5.6",
+  "notes": "# NaxOne v0.5.6\n\n## 关键修复\n\n- **修复版本检查 ACL 报错**：`capabilities/default.json` 加 `core:app:default` 权限。v0.5.5 启动时弹出的 `Command plugin:app|version not allowed by ACL` 提示已彻底解决，更新 banner 重新可见。\n- **加固更新检查代码**：`getVersion()` 拆出独立 try，未来即使再出现单点权限漏配也不会让整块更新检查失败。\n\n## 新功能\n\n- **设置页新增「应用更新」面板**：\n  - 左侧显示当前版本号\n  - 中间是圆形蓝色刷新按钮，点击有旋转动画\n  - 右侧显示状态（\"点击检查\"/\"已是最新\"/红点+\"有新版本 vX.Y.Z 点击更新\"）\n  - 显示上次检查的完整时间（含日期）\n  - disabled 时按钮变灰、禁用悬浮缩放，视觉反馈更准确\n\n## 升级方式\n\n- v0.5.5 用户：手动下载本页的 `NaxOne_0.5.6_x64-setup.exe` 覆盖安装一次（因为 ACL 是编译进 exe 的，旧版本无法 OTA 自检）\n- v0.5.6 起：可以在「设置 → 应用更新」点圆形按钮检查，或保持仪表盘顶部 banner 提示\n",
+  "pub_date": "2026-05-07T13:54:58Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSXBZWmVaZ1pMZjVLQldRdlVOMmwwZkx0azJycUtEeWg4UWVmNmRxME9rd0lYMzdUQmo0bitEUUVseitRMHUycWRLcWlaKzFuRFp6cGNmVnB5K0FUc0NyU2ppTnBoelFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4MTQ5MjI4CWZpbGU6TmF4T25lXzAuNS41X3g2NC1zZXR1cC5leGUKOTM0NGN6NnJra1p2NXZxRVdVOVNQNDlHaTVGeDZaRjlIZ2tsZnJ0SExEUDdXT1BlWXpFdUNwakYxRWpqT1ZqcFQxc2lxMDVsVzB0SUJOTEdENFA4Qnc9PQo=",
-      "url": "https://gitee.com/kz_y/naxone/releases/download/v0.5.5/NaxOne_0.5.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSXBZWmVaZ1pMZjFFajFIV0FSc1Q4OXlRWTRTN0VocDRPSnBmMHRYVXdPVTJFZElZUXo3T2gwZWhVSG9pMk9LZXBQUjRJdXhTTy93bXVNWFM2MEUzbXBWMU1uRC9QVVFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4MTYxOTM5CWZpbGU6TmF4T25lXzAuNS42X3g2NC1zZXR1cC5leGUKdHB2cnJBcmo1M242N3pFNlp4cUc2WkZBVUcxL1dHcHdFWnJiajZqU3FXcjZrLzlYanFrbXZoc2tGM1lUc2FTMXFrK3NFYmp6U0N1Q1BqQXdjNW1HQmc9PQo=",
+      "url": "https://gitee.com/kz_y/naxone/releases/download/v0.5.6/NaxOne_0.5.6_x64-setup.exe"
     }
   }
 }
