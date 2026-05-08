@@ -230,26 +230,26 @@ onMounted(() => { loadConfig(); loadCurrentVersion(); });
     <!-- 应用更新 -->
     <div class="card mb-3">
       <h2 class="text-[16px] font-medium text-content-secondary mb-3">应用更新</h2>
-      <div class="flex items-center justify-between gap-4">
-        <!-- 左：当前版本 -->
-        <div class="flex flex-col gap-0.5 min-w-[100px]">
+      <div class="flex items-center gap-3">
+        <!-- 左：当前版本（label + 数字横排，baseline 对齐） -->
+        <div class="flex items-baseline gap-2">
           <span class="text-[13px] text-content-muted">当前版本</span>
           <span class="text-[16px] font-medium tabular-nums">v{{ currentVersion || "—" }}</span>
         </div>
 
-        <!-- 中：圆形刷新按钮 -->
+        <!-- 圆形刷新按钮 -->
         <button
-          class="relative w-11 h-11 rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-60 disabled:cursor-wait disabled:hover:scale-100 disabled:active:scale-100"
+          class="relative w-8 h-8 rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95 disabled:opacity-60 disabled:cursor-wait disabled:hover:scale-100 disabled:active:scale-100"
           :disabled="checking || updating"
           @click="checkUpdate"
           :title="checking ? '检查中...' : '检查更新'"
           style="background: rgba(99,128,255,0.12); border: 1px solid var(--border-color)"
         >
-          <RefreshCw :size="18" :class="checking ? 'animate-spin' : ''" :style="{ color: 'var(--accent-blue)' }" />
+          <RefreshCw :size="14" :class="checking ? 'animate-spin' : ''" :style="{ color: 'var(--accent-blue)' }" />
         </button>
 
-        <!-- 右：状态 -->
-        <div class="flex items-center justify-end gap-2 min-w-[160px]">
+        <!-- 右：状态（推到最右） -->
+        <div class="ml-auto flex items-center gap-2">
           <template v-if="updating">
             <span class="text-[13px] text-content-muted">更新中...</span>
           </template>

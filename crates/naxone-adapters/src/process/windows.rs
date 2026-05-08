@@ -35,6 +35,12 @@ const STATUS_CACHE_TTL: Duration = Duration::from_millis(1000);
 /// netstat snapshot 的合并窗口：同一轮 refresh_all 内所有 status 复用一份
 const NETSTAT_SNAPSHOT_TTL: Duration = Duration::from_millis(500);
 
+/// 模块级共享的 sysinfo System 实例。
+/// 所有进程查询（内存、name、exe 路径）都走它，绕开 tasklist/wmic 的 WMI 调用。
+/// 复用同一个 System 省去重建结构的 ~5ms 开销。
+static SYS: std::sync::LazyLock<tokio::sync::Mutex<sysinfo::System>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(sysinfo::System::new()));
+
 pub struct WindowsProcessManager {
     processes: Arc<RwLock<HashMap<String, ProcessInfo>>>,
     /// 按 instance.id() 缓存上次 status 结果，降低重复探测成本
@@ -724,39 +730,24 @@ pub async fn netstat_snapshot() -> HashMap<u16, u32> {
     map
 }
 
-/// 一次 `tasklist /FO CSV /NH` 把所有进程的 PID → 工作集内存（MB）抓全
+/// 全进程 PID → 工作集内存（MB）。走 sysinfo（NtQuerySystemInformation），不调 tasklist。
 pub async fn tasklist_memory_snapshot() -> HashMap<u32, u64> {
-    let mut map = HashMap::new();
-    let output = Command::new("tasklist")
-        .no_window()
-        .args(["/FO", "CSV", "/NH"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .await;
-    let Ok(output) = output else { return map };
-    let text = String::from_utf8_lossy(&output.stdout);
-    // CSV 每行: "Image Name","PID","Session Name","Session#","Mem Usage"
-    // e.g.   "nginx.exe","1234","Console","1","12,345 K"
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let fields = parse_csv_line(line);
-        if fields.len() < 5 {
-            continue;
-        }
-        let Ok(pid) = fields[1].parse::<u32>() else { continue };
-        let mem = parse_tasklist_memory(&fields[4]);
-        if let Some(mb) = mem {
-            map.insert(pid, mb);
-        }
-    }
-    map
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate};
+    let mut sys = SYS.lock().await;
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new().with_memory(),
+    );
+    sys.processes()
+        .iter()
+        .map(|(pid, p)| (pid.as_u32(), p.memory() / 1024 / 1024)) // bytes → MB
+        .collect()
 }
 
 /// Parse `"12,345 K"` 或 `"1,234,567 K"` → MB（四舍五入到整数）
+/// 保留以兼容现有测试覆盖（之前 tasklist CSV 解析的单元测试）。
+#[allow(dead_code)]
 fn parse_tasklist_memory(raw: &str) -> Option<u64> {
     let trimmed = raw.trim().trim_end_matches('K').trim_end_matches(' ').trim();
     let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -766,6 +757,7 @@ fn parse_tasklist_memory(raw: &str) -> Option<u64> {
 }
 
 /// 简易 CSV 行 parser：处理 `"a","b"` 格式，字段里不含逗号的情况
+#[allow(dead_code)]
 fn parse_csv_line(line: &str) -> Vec<String> {
     let mut fields = Vec::new();
     let mut current = String::new();
@@ -784,59 +776,35 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 }
 
 /// Get the executable name of a process by PID using `tasklist`
+/// 取进程 exe 名（小写，含扩展名，如 `"nginx.exe"`）。走 sysinfo，不调 tasklist。
 pub async fn get_process_name(pid: u32) -> Option<String> {
-    if pid == 0 {
-        return None;
-    }
-    let output = Command::new("tasklist")
-        .no_window()
-        .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .await
-        .ok()?;
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    // Output: "nginx.exe","1234","Console","1","12,345 K"
-    let first_line = text.lines().next()?;
-    let name = first_line.split(',').next()?;
-    Some(name.trim_matches('"').to_lowercase())
+    if pid == 0 { return None; }
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate};
+    let target = Pid::from_u32(pid);
+    let mut sys = SYS.lock().await;
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[target]),
+        true,
+        ProcessRefreshKind::new(),
+    );
+    sys.process(target).map(|p| p.name().to_string_lossy().to_lowercase())
 }
 
-/// 取进程的真实 exe 完整路径（用 wmic）。失败返回 None。
+/// 取进程的真实 exe 完整路径。走 sysinfo（之前用 wmic 命令，会触发 WmiPrvSE 高 CPU）。
 /// 用来识别端口占用者属于哪个安装目录（外部进程检测）。
 pub async fn get_process_exe_path(pid: u32) -> Option<String> {
-    if pid == 0 {
-        return None;
-    }
-    let output = Command::new("wmic")
-        .no_window()
-        .args([
-            "process",
-            "where",
-            &format!("ProcessId={}", pid),
-            "get",
-            "ExecutablePath",
-            "/value",
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .await
-        .ok()?;
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("ExecutablePath=") {
-            let path = rest.trim();
-            if !path.is_empty() {
-                return Some(path.to_string());
-            }
-        }
-    }
-    None
+    if pid == 0 { return None; }
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
+    let target = Pid::from_u32(pid);
+    let mut sys = SYS.lock().await;
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[target]),
+        true,
+        ProcessRefreshKind::new().with_exe(UpdateKind::OnlyIfNotSet),
+    );
+    sys.process(target)
+        .and_then(|p| p.exe())
+        .map(|e| e.to_string_lossy().to_string())
 }
 
 /// Check if a PID belongs to a specific service kind

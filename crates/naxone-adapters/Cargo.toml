@@ -24,3 +24,6 @@ time = "0.3"
 # 读取 HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 # 以自动发现 Clash/V2ray 等"系统代理"开关的代理地址
 winreg = "0.52"
+# 进程信息查询（PID/内存）。Windows 上走 NtQuerySystemInformation，
+# 不经过 WMI，避免 tasklist.exe 触发 WmiPrvSE.exe 高 CPU。
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }

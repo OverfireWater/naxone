@@ -218,7 +218,7 @@ pub fn resolve_packages_root(config: &AppConfig) -> PathBuf {
             let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
             PathBuf::from(home).join("AppData").join("Roaming")
         });
-    appdata.join("NaxOne").join("Extensions")
+    appdata.join(naxone_appdata_dirname()).join("Extensions")
 }
 
 /// 新用户 / 迁移时使用的默认 WWW 根目录。
@@ -241,7 +241,7 @@ pub fn resolve_default_www_root() -> PathBuf {
             let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
             PathBuf::from(home).join("AppData").join("Roaming")
         });
-    appdata.join("NaxOne").join("www")
+    appdata.join(naxone_appdata_dirname()).join("www")
 }
 
 /// Legacy root from the first store prototype (`%APPDATA%/NaxOne/Packages/`).
@@ -255,7 +255,7 @@ pub fn legacy_packages_root() -> PathBuf {
             let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
             PathBuf::from(home).join("AppData").join("Roaming")
         });
-    appdata.join("NaxOne").join("Packages")
+    appdata.join(naxone_appdata_dirname()).join("Packages")
 }
 
 /// Probe: can we create a file in this directory? Cheap, avoids relying on
@@ -300,18 +300,23 @@ fn is_cargo_target_path(path: &std::path::Path) -> bool {
 
 fn legacy_default_www_root() -> PathBuf {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-    PathBuf::from(home).join(".naxone").join("www")
+    PathBuf::from(home).join(naxone_home_dirname()).join("www")
 }
+
+/// dev 和 prod 共享同一个数据目录，允许两边同时启动。
+/// 代价：双开同时写配置文件会竞态（实战几乎不会撞，因为写入是低频用户操作）。
+pub const fn naxone_home_dirname() -> &'static str { ".naxone" }
+pub const fn naxone_appdata_dirname() -> &'static str { "NaxOne" }
 
 pub fn vhosts_json_path() -> PathBuf {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-    PathBuf::from(home).join(".naxone").join("vhosts.json")
+    PathBuf::from(home).join(naxone_home_dirname()).join("vhosts.json")
 }
 
 pub fn config_path() -> PathBuf {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
     PathBuf::from(home)
-        .join(".naxone")
+        .join(naxone_home_dirname())
         .join("naxone.toml")
 }
 
@@ -322,7 +327,7 @@ fn default_config() -> AppConfig {
         AppConfig::default_with_phpstudy(phpstudy_path, www_root)
     } else {
         let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-        AppConfig::default_with_phpstudy(PathBuf::from(home).join(".naxone"), www_root)
+        AppConfig::default_with_phpstudy(PathBuf::from(home).join(naxone_home_dirname()), www_root)
     }
 }
 

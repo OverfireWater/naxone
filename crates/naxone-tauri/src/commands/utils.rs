@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::sync::LazyLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static APP_START: LazyLock<Instant> = LazyLock::new(Instant::now);
 
@@ -13,14 +13,20 @@ pub struct AppStats {
 }
 
 /// NaxOne 自身的进程统计：PID / 工作集内存 / 运行时长
+///
+/// 内存获取用 tasklist（全系统扫描），在 dev debug build + 双开实例时单次能跑 10s+。
+/// 这里硬上 2s 超时，超时返回 None：UI 显示 "—" 比阻塞前端 IPC 重要。
 #[tauri::command]
 pub async fn get_app_stats() -> Result<AppStats, String> {
     let pid = std::process::id();
-    // 只有 Windows 查得到内存（借用 adapters 的 tasklist 辅助）
+
     #[cfg(target_os = "windows")]
     let memory_mb = {
-        let map = naxone_adapters::process::windows::tasklist_memory_snapshot().await;
-        map.get(&pid).copied()
+        let fut = naxone_adapters::process::windows::tasklist_memory_snapshot();
+        match tokio::time::timeout(Duration::from_secs(2), fut).await {
+            Ok(map) => map.get(&pid).copied(),
+            Err(_) => None, // tasklist 卡住了（系统忙 / 双开），降级显示
+        }
     };
     #[cfg(not(target_os = "windows"))]
     let memory_mb: Option<u64> = None;

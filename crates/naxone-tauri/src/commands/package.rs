@@ -169,7 +169,7 @@ fn php_cache() -> DiskCache {
 
 fn cache_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-    std::path::PathBuf::from(home).join(".naxone").join("cache")
+    std::path::PathBuf::from(home).join(crate::state::naxone_home_dirname()).join("cache")
 }
 
 /// Merge 镜像版本到现有列表。策略：

@@ -20,19 +20,24 @@ fn main() {
 
     let app_state = AppState::new();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 用户再次点击 exe 或快捷方式 → 激活已有窗口
-            let windows = app.webview_windows();
-            if let Some(win) = windows.values().next() {
-                let _ = win.set_focus();
-                let _ = win.unminimize();
-                let _ = win.show();
-            }
-        }))
+        .plugin(tauri_plugin_process::init());
+
+    // single-instance 只在 release 注册：dev 时允许和已装正式版并行，方便看 UI 改动
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // 用户再次点击 exe 或快捷方式 → 激活已有窗口
+        let windows = app.webview_windows();
+        if let Some(win) = windows.values().next() {
+            let _ = win.set_focus();
+            let _ = win.unminimize();
+            let _ = win.show();
+        }
+    }));
+
+    builder
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::service::get_services,

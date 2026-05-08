@@ -167,7 +167,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
       <div class="absolute inset-0" style="background: rgba(0,0,0,0.3)" @click="emit('close')"></div>
       <div class="absolute top-0 right-0 h-full flex flex-col shadow-2xl"
            @click.stop
-           style="width: 480px; background: var(--bg-secondary); border-left: 1px solid var(--border-color)">
+           style="width: 480px;
+                  background: var(--bg-drawer);
+                  backdrop-filter: var(--bg-glass-blur);
+                  -webkit-backdrop-filter: var(--bg-glass-blur);
+                  border-left: 1px solid var(--border-color)">
         <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--border-color)">
           <div class="flex items-center gap-2">
             <span class="text-[16px] font-semibold">活动日志</span>

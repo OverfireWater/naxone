@@ -63,9 +63,9 @@ pub async fn generate_self_signed_cert(
     if server_name.trim().is_empty() {
         return Err("请先填写域名（server_name）".into());
     }
-    // 证书存放目录：~/.naxone/certs/
+    // 证书存放目录：~/.naxone/certs/（dev 用 .naxone-dev/certs/）
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-    let out_dir = PathBuf::from(home).join(".naxone").join("certs");
+    let out_dir = PathBuf::from(home).join(crate::state::naxone_home_dirname()).join("certs");
 
     let (cert, key) = naxone_adapters::platform::ssl_cert::generate_self_signed(
         &server_name,
