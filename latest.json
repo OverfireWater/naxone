@@ -1,11 +1,11 @@
 {
-  "version": "v0.5.7",
-  "notes": "# NaxOne v0.5.7\n\n## 性能优化\n\n- **大幅降低 WMI 占用**：Windows 进程查询从 `tasklist.exe` / `wmic` 命令改为 `sysinfo` crate（走 NT 内核 API），完全绕开 WMI 接口。\n  - WmiPrvSE.exe CPU：从 ~25% → 0%\n  - 服务状态预热：从 ~10 秒 → 0.3 秒（快 35 倍）\n  - 启动时不再有几秒钟卡顿\n- **`get_app_stats` 加 2 秒兜底超时**：极端场景下进程枚举卡住时降级显示（内存列 \"—\"），不再阻塞前端 IPC。\n\n## 体验改进\n\n- **设置 → 应用更新**：新增检查更新面板。圆形蓝按钮点击有旋转动画，发现新版本时会显示红点提醒和「点击更新」入口（直接 OTA 安装、无需手动下载）。\n- **活动日志面板**：背景从透明白调整为 88% 不透明 + 玻璃模糊，文字更易读、不再透出花花绿绿的光晕。\n\n## 开发体验\n\n- **dev 与正式版可并行运行**：debug build 不再注册 single-instance plugin，方便边开发边查看正式环境。两边共享配置目录，知道写入会有竞态即可。\n\n## 升级方式\n\n- v0.5.6 用户：在设置 → 应用更新点圆形按钮，或直接保持仪表盘 banner 提示。\n- v0.5.5 及更早用户：手动下载本页 `NaxOne_0.5.7_x64-setup.exe` 覆盖安装一次。\n",
-  "pub_date": "2026-05-08T05:23:44Z",
+  "version": "v0.5.12",
+  "notes": "NaxOne v0.5.12",
+  "pub_date": "2026-05-09T10:04:03Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSXBZWmVaZ1pMZnhyNEhBcWY2d3ByNmxiM0JWNG9GcmlOS1lOZjlFbFFYaEZhUjVyalc1eHVKWm5zWUdYSWZwclo2NWJYdS9IMG92dlMrK1lycmV4VGFlY0NMYjNGMXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4MjE3ODI0CWZpbGU6TmF4T25lXzAuNS43X3g2NC1zZXR1cC5leGUKaGR5NFV2alVhVWRYYWFTU3U5cSsxQUthTXFDUnZHYlJUSGVkNDM2NTB3aFYxVmxYTktTZEN6YlZDc2hBMm1ZWi9mSkczd1RFOHF6TVo3Nm8rVVJVQnc9PQo=",
-      "url": "https://gitee.com/kz_y/naxone/releases/download/v0.5.7/NaxOne_0.5.7_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSXBZWmVaZ1pMZnpta2EyQkZXQllmMU1pTUtieDlCUWEvNG9LeW1aa2pHS3ZaL1BQZ1lqOTJWVS81b3Q5UnQ2QTNjNFMzY3ZzdnNqUlFYVTdkYVEyZXNHT0YxditTRmdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4MzIxMDQzCWZpbGU6TmF4T25lXzAuNS4xMl94NjQtc2V0dXAuZXhlCmZHVjJvaUdRWmhIaUJqVWIxWllLOUt4VHJlclhSOHZhQU9LSlg3dGhIdnhQZGt0YitIQmcxemdtUmJFOC9LSkRlNkZlNTRrTE5vTTIxOUZYWDZlWENnPT0K",
+      "url": "https://gitee.com/kz_y/naxone/releases/download/v0.5.12/NaxOne_0.5.12_x64-setup.exe"
     }
   }
 }
