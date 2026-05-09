@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -58,6 +58,11 @@ const phpServices = computed(() => services.value.filter(s => s.kind === "php"))
 const currentMysqlOption = computed<MysqlOption | undefined>(() =>
   devTools.value.mysql?.available.find(a => a.version === mysqlPick.value)
 );
+
+// 切换 MySQL 实例时把已存的 root 密码回填到输入框（默认 type=password 显示为 ***）
+watch(currentMysqlOption, (opt) => {
+  mysqlPwdInput.value = opt?.root_password || "";
+}, { immediate: true });
 
 function originShort(s: ServiceInfo): string {
   if (s.origin === "phpstudy") return "PS";

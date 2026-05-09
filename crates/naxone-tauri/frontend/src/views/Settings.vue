@@ -1,9 +1,10 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw } from "lucide-vue-next";
+import { RefreshCw, Search, Copy, X } from "lucide-vue-next";
 import { toast, friendlyError } from "../composables/useToast";
 import SelectMenu from "../components/SelectMenu.vue";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 
 interface ConfigDto {
   phpstudy_path: string; www_root: string; active_web_server: string;
@@ -61,6 +62,72 @@ function toggleAutoStart(service: string) {
   const idx = config.value.auto_start.indexOf(service);
   if (idx >= 0) config.value.auto_start.splice(idx, 1);
   else config.value.auto_start.push(service);
+}
+
+// ─── 端口检测 ───────────────────────────────────
+interface PortListener {
+  pid: number;
+  process_name: string | null;
+  exe_path: string | null;
+  source: string | null;
+  local_address: string;
+}
+interface PortDiagnosis {
+  port: number;
+  in_use: boolean;
+  listeners: PortListener[];
+}
+
+const testPort = ref<number>(80);
+const diagResult = ref<PortDiagnosis | null>(null);
+const diagBusy = ref(false);
+const showKillConfirm = ref(false);
+const killBusy = ref(false);
+const killTarget = ref<PortListener | null>(null);
+
+async function runDiagnose() {
+  if (!testPort.value || testPort.value < 1 || testPort.value > 65535) {
+    showError("端口号必须在 1–65535 之间");
+    return;
+  }
+  diagBusy.value = true;
+  try {
+    diagResult.value = await invoke<PortDiagnosis>("diagnose_port", { port: testPort.value });
+  } catch (e) {
+    showError("检测失败: " + e);
+  } finally {
+    diagBusy.value = false;
+  }
+}
+
+async function copyPid(pid: number) {
+  try {
+    await navigator.clipboard.writeText(String(pid));
+    toast.success(`已复制 PID ${pid}`);
+  } catch {
+    showError("复制失败");
+  }
+}
+
+function askKill(l: PortListener) {
+  killTarget.value = l;
+  showKillConfirm.value = true;
+}
+
+async function confirmKill() {
+  if (!killTarget.value) return;
+  killBusy.value = true;
+  try {
+    await invoke("kill_process_by_pid", { pid: killTarget.value.pid });
+    toast.success(`已结束进程 PID ${killTarget.value.pid}`);
+    showKillConfirm.value = false;
+    killTarget.value = null;
+    await runDiagnose();
+  } catch (e) {
+    showError("结束进程失败: " + e);
+  } finally {
+    killBusy.value = false;
+  }
 }
 
 // ─── 应用更新 ───────────────────────────────────
@@ -187,6 +254,59 @@ onMounted(() => { loadConfig(); loadCurrentVersion(); });
       </div>
     </div>
 
+    <!-- Port Diagnosis -->
+    <div class="card mb-3">
+      <h2 class="text-[16px] font-medium text-content-secondary mb-3">端口检测</h2>
+      <p class="text-[13px] text-content-muted mb-3">输入端口号查看占用进程，可一键结束。</p>
+      <div class="flex items-center gap-2 mb-3">
+        <input class="input" type="number" min="1" max="65535" v-model.number="testPort"
+               placeholder="端口号" style="max-width: 160px"
+               @keyup.enter="runDiagnose" />
+        <button class="btn btn-primary btn-sm flex items-center gap-1" :disabled="diagBusy" @click="runDiagnose">
+          <Search :size="14" />
+          {{ diagBusy ? '检测中…' : '检测' }}
+        </button>
+      </div>
+
+      <div v-if="diagResult">
+        <!-- 空闲 -->
+        <div v-if="!diagResult.in_use" class="text-[13px]"
+             style="color: var(--color-success); padding: 10px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px">
+          ✅ 端口 {{ diagResult.port }} 空闲
+        </div>
+
+        <!-- 占用 -->
+        <div v-else>
+          <div class="text-[13px] mb-2" style="color: var(--color-danger)">
+            ⚠️ 端口 {{ diagResult.port }} 被占用（{{ diagResult.listeners.length }} 个监听）
+          </div>
+          <div v-for="l in diagResult.listeners" :key="l.pid"
+               style="padding: 10px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px">
+            <div class="text-[13px]" style="color: var(--text-primary)">
+              <span style="font-family: var(--font-mono)">{{ l.process_name || '未知进程' }}</span>
+              <span style="color: var(--text-muted)"> · PID {{ l.pid }}</span>
+              <span v-if="l.source" class="ml-2 px-1.5 py-px rounded text-[12px]"
+                    style="background: var(--color-blue); color: white">{{ l.source }}</span>
+            </div>
+            <div v-if="l.exe_path" class="text-[12px] mt-1" style="color: var(--text-muted); word-break: break-all">
+              {{ l.exe_path }}
+            </div>
+            <div class="text-[12px] mt-1" style="color: var(--text-muted)">
+              监听：{{ l.local_address }}
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button class="btn btn-secondary btn-sm flex items-center gap-1" @click="copyPid(l.pid)">
+                <Copy :size="12" /> 复制 PID
+              </button>
+              <button class="btn btn-danger btn-sm flex items-center gap-1" @click="askKill(l)">
+                <X :size="12" /> 结束进程
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Auto Start -->
     <div class="card mb-3">
       <h2 class="text-[16px] font-medium text-content-secondary mb-3">自动启动</h2>
@@ -278,5 +398,19 @@ onMounted(() => { loadConfig(); loadCurrentVersion(); });
       <button class="btn btn-secondary btn-sm" @click="rescan" :disabled="busy">重新扫描服务</button>
       <span v-if="saved" class="saved-msg">已保存</span>
     </div>
+
+    <ConfirmDialog
+      :open="showKillConfirm"
+      title="结束进程"
+      variant="danger"
+      confirm-text="确认结束"
+      :busy="killBusy"
+      @confirm="confirmKill"
+      @cancel="showKillConfirm = false"
+    >
+      确认结束 <b>{{ killTarget?.process_name || '未知进程' }}</b>（PID {{ killTarget?.pid }}）？
+      <br />
+      该进程相关的服务可能会立即停止。
+    </ConfirmDialog>
   </div>
 </template>

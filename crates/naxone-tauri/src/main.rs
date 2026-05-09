@@ -113,6 +113,13 @@ fn main() {
             commands::tools::set_global_mysql,
             commands::tools::set_mysql_password,
             commands::tools::fix_mysql_path_conflicts,
+            commands::port::diagnose_port,
+            commands::port::kill_process_by_pid,
+            commands::pie::pie_runtime_info,
+            commands::pie::pie_search,
+            commands::pie::pie_install,
+            commands::vhost::read_vhost_conf,
+            commands::vhost::write_vhost_conf,
         ])
         .setup(|app| {
             // Dev 模式窗口标题加标识

@@ -2,6 +2,8 @@ pub mod hosts;
 pub mod logger;
 pub mod package;
 pub mod php;
+pub mod pie;
+pub mod port;
 pub mod service;
 pub mod service_config;
 pub mod strangers;

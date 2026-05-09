@@ -6,6 +6,7 @@ import { useRouter } from "vue-router";
 import { APP_NAME } from "../composables/useAppInfo";
 import SelectMenu from "../components/SelectMenu.vue";
 import LogDrawer from "../components/LogDrawer.vue";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 
 const router = useRouter();
 
@@ -400,11 +401,68 @@ async function loadDevTools() {
 
 // ==================== Actions ====================
 
+// 端口冲突诊断对话框 state
+const portConflict = ref<{
+  serviceId: string; serviceName: string; port: number;
+  pid: number; processName: string; exePath: string;
+} | null>(null);
+const portConflictBusy = ref(false);
+
+/// 解析后端"端口 X 已被外部进程占用 (PID Y, Z)"格式错误
+function parsePortConflict(err: string): { port: number; pid: number; exe: string } | null {
+  const m = err.match(/端口\s*(\d+)\s*已被外部进程占用\s*\(PID\s*(\d+),\s*([^)]+)\)/);
+  if (!m) return null;
+  return { port: parseInt(m[1]), pid: parseInt(m[2]), exe: m[3].trim() };
+}
+
 async function startService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
-  try { services.value = await invokeWithTimeout("start_service", { id }); }
-  catch (e) { showError("启动失败: " + e); }
-  finally { busyIds.value.delete(id); }
+  try {
+    services.value = await invokeWithTimeout("start_service", { id });
+  } catch (e) {
+    const errStr = String(e);
+    const conflict = parsePortConflict(errStr);
+    if (conflict) {
+      const svc = services.value.find(s => s.id === id);
+      const exeBase = conflict.exe.split(/[\\/]/).pop() || conflict.exe;
+      portConflict.value = {
+        serviceId: id,
+        serviceName: svc ? `${svc.kind} v${svc.version}` : id,
+        port: conflict.port,
+        pid: conflict.pid,
+        processName: exeBase,
+        exePath: conflict.exe,
+      };
+    } else {
+      showError("启动失败: " + e);
+    }
+  } finally { busyIds.value.delete(id); }
+}
+
+async function killAndRetryStart() {
+  if (!portConflict.value) return;
+  portConflictBusy.value = true;
+  try {
+    await invokeWithTimeout("kill_process_by_pid", { pid: portConflict.value.pid });
+    toast.success(`已结束进程 PID ${portConflict.value.pid}`);
+    const sid = portConflict.value.serviceId;
+    portConflict.value = null;
+    // 等 1 秒让端口释放
+    await new Promise((r) => setTimeout(r, 1000));
+    busyIds.value.add(sid); pauseAutoRefresh();
+    try {
+      services.value = await invokeWithTimeout("start_service", { id: sid });
+      toast.success("服务已启动");
+    } catch (e2) {
+      showError("重试启动仍失败: " + e2);
+    } finally {
+      busyIds.value.delete(sid);
+    }
+  } catch (e) {
+    showError("结束进程失败: " + e);
+  } finally {
+    portConflictBusy.value = false;
+  }
 }
 
 async function stopService(id: string) {
@@ -697,6 +755,28 @@ onUnmounted(() => {
 
     <!-- Log Drawer -->
     <LogDrawer :open="logDrawerOpen" @close="logDrawerOpen = false" />
+
+    <!-- 端口冲突自动诊断对话框 -->
+    <ConfirmDialog
+      :open="!!portConflict"
+      title="启动失败：端口被占用"
+      variant="danger"
+      confirm-text="结束进程并重试"
+      :busy="portConflictBusy"
+      @confirm="killAndRetryStart"
+      @cancel="portConflict = null"
+    >
+      <template v-if="portConflict">
+        <b>{{ portConflict.serviceName }}</b> 启动失败：端口 <b>{{ portConflict.port }}</b> 被以下进程占用：
+        <div style="margin-top: 8px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: 6px; border: 1px solid var(--border-color); font-family: var(--font-mono); font-size: 12px">
+          <div>{{ portConflict.processName }} (PID {{ portConflict.pid }})</div>
+          <div style="color: var(--text-muted); font-size: 11px; margin-top: 2px; word-break: break-all">{{ portConflict.exePath }}</div>
+        </div>
+        <div style="margin-top: 8px; color: var(--text-muted); font-size: 12px">
+          点击"结束进程并重试"会先结束该进程（如 PHPStudy 自带的 nginx），等待 1 秒后再次启动 NaxOne 的服务。
+        </div>
+      </template>
+    </ConfirmDialog>
   </div>
 </template>
 

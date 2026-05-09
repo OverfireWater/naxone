@@ -619,7 +619,7 @@ fn finalize_install(
             };
             if let Some(src) = template {
                 if let Err(e) = std::fs::copy(&src, &ini) {
-                    tracing::warn!("生成 php.ini 失败 (从 {}): {}", src.display(), e);
+                    tracing::warn!("生成 php.ini 失败 (from {}): {}", src.display(), e);
                 } else {
                     tracing::info!(
                         "已生成 php.ini（来自 {}）",
@@ -628,6 +628,12 @@ fn finalize_install(
                 }
             } else {
                 tracing::warn!("找不到 php.ini-production/development 模板，跳过 ini 初始化");
+            }
+        }
+        // 即使 ini 已存在，也尝试 harden 一遍：设 extension_dir + 启用核心扩展（幂等）
+        if ini.exists() {
+            if let Err(e) = harden_php_ini(&ini, final_dir) {
+                tracing::warn!("harden php.ini 失败: {}", e);
             }
         }
     }
@@ -641,6 +647,67 @@ fn finalize_install(
         install_path: final_dir.display().to_string(),
     });
     Ok(final_dir.to_path_buf())
+}
+
+/// 让一个新装/已存在的 PHP 立即可用：
+/// 1. 设 `extension_dir` 为 PHP 安装目录下的 `ext`（覆盖默认硬编码 `C:\php\ext`）
+/// 2. 启用核心扩展（openssl/curl/mbstring/fileinfo/zip/intl/gd 等），
+///    让 composer/PIE 等命令行工具能跑起来
+/// 幂等：已启用的不重复，未注释的保留。
+pub fn harden_php_ini(ini_path: &Path, install_dir: &Path) -> std::io::Result<()> {
+    let raw = std::fs::read_to_string(ini_path)?;
+    let mut text = raw.clone();
+
+    // 1. extension_dir
+    let ext_dir = install_dir.join("ext");
+    let ext_dir_str = ext_dir.display().to_string().replace('\\', "/");
+    let already_set = text
+        .lines()
+        .any(|ln| !ln.trim_start().starts_with(';') && ln.trim_start().starts_with("extension_dir"));
+    if !already_set {
+        // 注释掉所有 ;extension_dir = 行后追加一行
+        let new_line = format!("extension_dir = \"{}\"", ext_dir_str);
+        text.push_str("\n; --- NaxOne harden ---\n");
+        text.push_str(&new_line);
+        text.push('\n');
+    }
+
+    // 2. 启用核心扩展（取消 ;extension=name 的注释）
+    let core_exts = [
+        "openssl",
+        "curl",
+        "mbstring",
+        "fileinfo",
+        "zip",
+        "intl",
+        "gd",
+        "exif",
+    ];
+    for ext in core_exts {
+        let commented = format!(";extension={}", ext);
+        let enabled = format!("extension={}", ext);
+        // 已有未注释的就跳过
+        if text
+            .lines()
+            .any(|ln| ln.trim() == enabled || ln.trim().starts_with(&format!("{}=", enabled)))
+        {
+            continue;
+        }
+        // 把第一个匹配的 `;extension=xxx` 替换成 `extension=xxx`
+        if let Some(pos) = text.find(&commented) {
+            let end = pos + commented.len();
+            text.replace_range(pos..end, &enabled);
+        } else {
+            // 完全没出现过：在末尾追加
+            text.push_str(&format!("\n{}\n", enabled));
+        }
+    }
+
+    if text != raw {
+        std::fs::write(ini_path, text)?;
+        tracing::info!("已 harden php.ini: {}", ini_path.display());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

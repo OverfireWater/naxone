@@ -5,7 +5,8 @@ import { open, confirm } from "@tauri-apps/plugin-dialog";
 import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
-import { Pencil, ExternalLink, FolderOpen, Trash2 } from "lucide-vue-next";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import { Pencil, ExternalLink, FolderOpen, Trash2, FileText } from "lucide-vue-next";
 
 interface VhostInfo {
   id: string; server_name: string; aliases: string[]; listen_port: number;
@@ -52,6 +53,44 @@ const busy = ref(false);
 const searchQuery = ref("");
 const showForm = ref(false);
 const editingId = ref<string | null>(null);
+const editingSource = ref<string>("");
+const showTakeover = ref(false);
+
+// Raw conf 编辑
+const showConfModal = ref(false);
+const confEditingId = ref<string>("");
+const confEditingDomain = ref<string>("");
+const confPath = ref<string>("");
+const confContent = ref<string>("");
+const confOriginal = ref<string>("");
+const confSaving = ref(false);
+
+async function openConfEdit(vh: VhostInfo) {
+  confEditingId.value = vh.id;
+  confEditingDomain.value = `${vh.server_name}:${vh.listen_port}`;
+  confContent.value = "";
+  confOriginal.value = "";
+  confPath.value = "";
+  showConfModal.value = true;
+  try {
+    const res = await invoke<{ path: string; content: string }>("read_vhost_conf", { id: vh.id });
+    confPath.value = res.path;
+    confContent.value = res.content;
+    confOriginal.value = res.content;
+  } catch (e) { showError("读取配置失败: " + e); showConfModal.value = false; }
+}
+
+async function saveConfEdit() {
+  if (confSaving.value) return;
+  if (confContent.value === confOriginal.value) { showConfModal.value = false; return; }
+  confSaving.value = true;
+  try {
+    await invoke("write_vhost_conf", { id: confEditingId.value, content: confContent.value });
+    showSuccess("配置已保存，nginx 已 reload");
+    showConfModal.value = false;
+  } catch (e) { showError("保存失败: " + e); }
+  finally { confSaving.value = false; }
+}
 const modalTab = ref<"basic" | "rewrite" | "ssl">("basic");
 const rewritePreset = ref("");
 // WWW 根目录（用户在设置里配的），新建 vhost 时用它作 document_root 默认值
@@ -113,6 +152,7 @@ function openCreate() {
 
 function openEdit(vh: VhostInfo) {
   editingId.value = vh.id;
+  editingSource.value = vh.source;
   modalTab.value = "basic";
   docRootTouched.value = true;  // 编辑时不自动改
   const matched = rewritePresets.find(p => p.value === vh.rewrite_rule && p.value !== "__custom__");
@@ -134,7 +174,7 @@ function onServerNameInput() {
 }
 
 function onRewritePresetChange(val: string) { rewritePreset.value = val; if (val !== "__custom__") form.value.rewrite_rule = val; }
-function cancelForm() { showForm.value = false; editingId.value = null; }
+function cancelForm() { showForm.value = false; editingId.value = null; editingSource.value = ""; }
 
 async function toggleVhost(vh: VhostInfo) {
   busy.value = true;
@@ -161,14 +201,30 @@ async function saveVhost() {
   const newId = `${form.value.server_name}_${form.value.listen_port}`;
   const dup = vhosts.value.find(v => v.id === newId && v.id !== editingId.value);
   if (dup) { showError(`站点 ${form.value.server_name}:${form.value.listen_port} 已存在`); return; }
+
+  // 编辑 PHPStudy 站点时，保存 = 接管。先弹确认对话框。
+  if (editingId.value && editingSource.value === "phpstudy") {
+    showTakeover.value = true;
+    return;
+  }
+
+  await doSaveVhost();
+}
+
+async function doSaveVhost() {
   busy.value = true;
   try {
     const isEdit = !!editingId.value;
     if (isEdit) vhosts.value = await invoke("update_vhost", { id: editingId.value, req: form.value });
     else vhosts.value = await invoke("create_vhost", { req: form.value });
-    showForm.value = false; editingId.value = null;
+    showForm.value = false; editingId.value = null; editingSource.value = "";
     showSuccess(isEdit ? "站点更新成功，已自动 reload Web 服务器" : "站点创建成功，已自动 reload Web 服务器");
   } catch (e) { showError("保存失败: " + e); } finally { busy.value = false; }
+}
+
+async function confirmTakeover() {
+  showTakeover.value = false;
+  await doSaveVhost();
 }
 
 async function deleteVhost(vh: VhostInfo) {
@@ -342,11 +398,11 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
             <div class="flex items-center justify-between mb-1">
               <label class="!mb-0">SSL 证书</label>
               <button class="btn btn-primary btn-sm" :disabled="sslBusy" @click="autoGenCert">
-                {{ sslBusy ? '生成中...' : '🔒 一键生成自签证书' }}
+                {{ sslBusy ? '生成中...' : '🔒 一键生成 HTTPS 证书' }}
               </button>
             </div>
             <div class="text-[13px]" style="color: var(--text-muted)">
-              本地开发 HTTPS 用。浏览器首次访问会提示"不安全"，手动继续即可；或用 mkcert 把本地 CA 装进系统信任。
+              首次签发会自动创建本地 CA 并安装到当前用户证书库（不需要管理员权限）。浏览器直接显示绿锁，不弹"不安全"警告。
             </div>
           </div>
           <div class="fg"><label>证书路径</label><div class="flex gap-1.5"><input class="input flex-1" v-model="form.ssl_cert" placeholder="*.pem / *.crt" /><button class="btn btn-secondary btn-sm" @click="browseFile('ssl_cert')">浏览</button></div></div>
@@ -357,6 +413,48 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
         </div>
       </div>
     </div>
+
+    <!-- ==================== Raw Nginx Conf Edit ==================== -->
+    <div v-if="showConfModal" class="modal-overlay" @click.self="showConfModal = false">
+      <div class="modal-content" style="width: 860px">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <div class="text-base font-semibold">Nginx 配置：{{ confEditingDomain }}</div>
+            <div v-if="confPath" class="text-[12px] mt-1" style="color: var(--text-muted); font-family: var(--font-mono); word-break: break-all">{{ confPath }}</div>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" :disabled="confSaving" @click="showConfModal = false">取消</button>
+            <button class="btn btn-success btn-sm" :disabled="confSaving" @click="saveConfEdit">{{ confSaving ? '保存中…' : '保存并 reload' }}</button>
+          </div>
+        </div>
+        <textarea class="input font-mono text-[13px] w-full"
+                  v-model="confContent"
+                  spellcheck="false"
+                  @keydown="onTextareaTab"
+                  style="min-height: 50vh; max-height: 60vh; resize: vertical; line-height: 1.5"></textarea>
+        <div class="text-[12px] mt-2" style="color: var(--text-muted)">
+          ⚠️ 修改后会自动 reload nginx。语法错误会让 nginx reload 失败。<br />
+          再次点击「✏️ 编辑」表单保存会按表单内容覆盖此文件。
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== Takeover Confirm ==================== -->
+    <ConfirmDialog
+      :open="showTakeover"
+      title="接管 PHPStudy 站点"
+      confirm-text="确认接管"
+      :busy="busy"
+      @confirm="confirmTakeover"
+      @cancel="showTakeover = false"
+    >
+      保存后，<b>{{ form.server_name }}</b> 将由 NaxOne 接管管理。之后：
+      <ul style="margin: 8px 0 0 18px; padding: 0; list-style: disc">
+        <li>在 NaxOne 内的修改会写入 nginx 配置并自动 reload</li>
+        <li>在 PHPStudy 软件内对该站点的修改可能被 NaxOne 下次保存覆盖</li>
+        <li>站点会从「PHPSTUDY 站点」分组移到「自建站点」分组</li>
+      </ul>
+    </ConfirmDialog>
 
     <!-- ==================== List ==================== -->
     <div v-if="filteredVhosts.length === 0 && !showForm" class="text-center py-16 text-content-secondary">
@@ -375,12 +473,12 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
       <div class="flex items-center px-5 py-2.5 text-[13px] font-semibold uppercase tracking-widest"
            style="color: var(--text-muted)">
         <span class="w-[200px]">域名</span>
-        <span class="w-14">端口</span>
+        <span class="w-20">端口</span>
         <span class="flex-1 min-w-0">网站目录</span>
         <span class="w-20 text-center">PHP</span>
         <span class="w-20 text-center">到期</span>
         <span class="w-14 text-center">状态</span>
-        <span class="w-40 text-right">操作</span>
+        <span class="w-48 text-right">操作</span>
       </div>
       <!-- Rows -->
       <div v-for="vh in g.items" :key="vh.id" class="group list-row gap-0">
@@ -394,7 +492,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           </div>
           <div v-if="vh.aliases.length > 0" class="text-[13px] mt-0.5 truncate" style="color: var(--text-muted)">{{ vh.aliases.join(", ") }}</div>
         </div>
-        <div class="w-14 shrink-0 text-[16px] font-mono" style="color: var(--text-muted)">{{ vh.listen_port }}</div>
+        <div class="w-20 shrink-0 text-[16px] font-mono" style="color: var(--text-muted)">{{ vh.has_ssl ? `${vh.listen_port}/443` : vh.listen_port }}</div>
         <div class="flex-1 min-w-0 text-[16px] truncate pr-3" style="color: var(--text-secondary)" :title="vh.document_root">{{ vh.document_root }}</div>
         <div class="w-20 shrink-0 text-center">
           <template v-if="phpDisplay(vh.php_version)">
@@ -410,8 +508,9 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
             <span class="toggle-slider"></span>
           </label>
         </div>
-        <div class="w-40 shrink-0 flex items-center gap-1 justify-end">
+        <div class="w-48 shrink-0 flex items-center gap-1 justify-end">
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openEdit(vh)" :disabled="busy" title="编辑"><Pencil :size="14" /></button>
+            <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openConfEdit(vh)" :disabled="busy" title="查看/编辑 nginx 配置"><FileText :size="14" /></button>
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openSite(vh); showFloat('已在浏览器打开')" title="在浏览器打开"><ExternalLink :size="14" /></button>
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity" @click="openDir(vh); showFloat('已打开目录')" title="打开目录"><FolderOpen :size="14" /></button>
             <button class="btn btn-secondary btn-sm !px-2 transition-opacity hover:!text-red-400" @click="deleteVhost(vh)" :disabled="busy" title="删除"><Trash2 :size="14" /></button>

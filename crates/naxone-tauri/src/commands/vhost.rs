@@ -381,6 +381,79 @@ pub async fn get_vhosts(state: State<'_, AppState>) -> Result<Vec<VhostInfo>, St
     Ok(all_infos(&vhosts))
 }
 
+#[derive(Debug, Serialize)]
+pub struct VhostConfFile {
+    pub path: String,
+    pub content: String,
+}
+
+#[tauri::command]
+pub async fn read_vhost_conf(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<VhostConfFile, String> {
+    let dirs = resolve_dirs(&state).await?;
+    let nginx_dir = dirs.nginx_vhosts.ok_or_else(|| "未找到 nginx vhosts 目录".to_string())?;
+
+    let vhosts = state.vhosts.read().await;
+    let vh = vhosts
+        .iter()
+        .find(|v| v.id == id)
+        .ok_or_else(|| format!("找不到站点 {}", id))?;
+    let filename = vh.config_filename();
+    let path = nginx_dir.join(&filename);
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读取 {} 失败: {}", path.display(), e))?;
+    Ok(VhostConfFile {
+        path: path.display().to_string(),
+        content,
+    })
+}
+
+#[tauri::command]
+pub async fn write_vhost_conf(
+    id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let dirs = resolve_dirs(&state).await?;
+    let nginx_dir = dirs.nginx_vhosts.ok_or_else(|| "未找到 nginx vhosts 目录".to_string())?;
+
+    let path = {
+        let vhosts = state.vhosts.read().await;
+        let vh = vhosts
+            .iter()
+            .find(|v| v.id == id)
+            .ok_or_else(|| format!("找不到站点 {}", id))?;
+        nginx_dir.join(vh.config_filename())
+    };
+
+    std::fs::write(&path, &content)
+        .map_err(|e| format!("写入 {} 失败: {}", path.display(), e))?;
+
+    push_log(
+        &state,
+        LogLevel::Info,
+        "vhost",
+        format!("手动编辑 nginx 配置：{}", id),
+        Some(path.display().to_string()),
+        None,
+    )
+    .await;
+
+    // best-effort reload nginx
+    let services = state.services.read().await;
+    let running_ws = VhostManager::find_running_web_server(&services).cloned();
+    drop(services);
+
+    if let Some(ws) = running_ws {
+        if let Err(e) = state.vhost_manager.reload_web_server(&ws).await {
+            return Err(format!("文件已保存，但 nginx reload 失败: {}", e));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn create_vhost(
     req: CreateVhostRequest,

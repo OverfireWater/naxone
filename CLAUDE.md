@@ -66,3 +66,12 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - 目标清晰但路径不是最短的，直接告诉我并建议更好的办法。
 - 遇到问题追根因，不打补丁。每个决策都要能回答"为什么"。
 - 输出说重点，砍掉一切不改变决策的信息。
+
+## 提交规范
+
+每次执行 git commit 前必须 bump 版本号：
+
+- 同步修改三处：`Cargo.toml` 的 `[workspace.package].version`、`crates/naxone-tauri/tauri.conf.json` 的 `version`、`crates/naxone-tauri/frontend/package.json` 的 `version`
+- 三个版本号必须保持一致
+- 默认 patch +1（如 0.5.7 → 0.5.8）。如本次为大功能或破坏性变更，与用户确认后再决定 minor/major 段
+- "提交但不发版"也要 bump：版本号代表代码状态而非发版状态。发版动作（git tag、release 脚本）才标志 release

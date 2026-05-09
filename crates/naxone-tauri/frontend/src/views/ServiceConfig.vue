@@ -1,11 +1,13 @@
 ﻿<script setup lang="ts">
-import { ref, watch, onMounted, computed } from "vue";
+import { ref, watch, onMounted, computed, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
 import GlobalEnv from "./GlobalEnv.vue";
+import { Plus, Search, Download, Copy } from "lucide-vue-next";
 
 type Tab = "nginx" | "mysql" | "redis" | "php" | "hosts" | "env";
 const route = useRoute();
@@ -170,6 +172,119 @@ async function savePhpIni() {
 }
 
 watch(selectedPhp, () => { loadPhpExts(); loadPhpIni(); });
+
+// ─── PIE 扩展安装 ───────────────────────────────────
+interface PieExtensionInfo { name: string; description: string }
+interface PieRuntimeInfo { runtime_php_path: string | null; runtime_version: string | null }
+interface RecommendedExt { name: string; ext: string; display: string; description: string; category: string; minPhp: string; maxPhp?: string }
+
+// 精选 Windows 可用扩展。
+// 现状：PIE 在 Windows 上能装的扩展非常少 —— 主流扩展（redis/imagick/mongodb 等）在 GitHub
+// release 不附 Windows binary，靠 windows.php.net/downloads/pecl/ 镜像分发，PIE 暂未接管这条路。
+// 实测唯一全 PHP 版本可装的精选扩展是 xdebug（它是 PIE 命名约定的标杆案例）。
+// 其他扩展请用搜索框尝试，多数会因 "未提供 Windows 安装包" 失败 —— 这是上游生态局限，不是 NaxOne bug。
+const recommendedExts: RecommendedExt[] = [
+  { name: "xdebug/xdebug", ext: "xdebug", display: "Xdebug", description: "断点调试 + 性能分析", category: "调试", minPhp: "8.0", maxPhp: "8.6" },
+];
+
+function parsePhpVer(v: string): [number, number, number] {
+  const parts = v.split(".").map((n) => parseInt(n) || 0);
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+}
+function cmpVer(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+function compatHint(r: RecommendedExt): { ok: boolean; hint: string } {
+  if (!selectedPhp.value) return { ok: true, hint: "" };
+  const cur = parsePhpVer(selectedPhp.value.version);
+  const min = parsePhpVer(r.minPhp);
+  if (cmpVer(cur, min) < 0) {
+    return { ok: false, hint: `需要 PHP ≥ ${r.minPhp}` };
+  }
+  if (r.maxPhp) {
+    const max = parsePhpVer(r.maxPhp);
+    if (cmpVer(cur, max) >= 0) {
+      return { ok: false, hint: `需要 PHP < ${r.maxPhp}` };
+    }
+  }
+  return { ok: true, hint: "" };
+}
+
+function isExtInstalled(extName: string): boolean {
+  const target = extName.toLowerCase();
+  return phpExts.value.some(e => e.name.toLowerCase() === target);
+}
+
+const showPieModal = ref(false);
+const pieRuntime = ref<PieRuntimeInfo | null>(null);
+const pieKw = ref("");
+const pieInstallLog = ref<string[]>([]);
+const pieLogEl = ref<HTMLElement | null>(null);
+let pieLogUnlisten: UnlistenFn | null = null;
+watch(pieInstallLog, async () => {
+  await nextTick();
+  if (pieLogEl.value) pieLogEl.value.scrollTop = pieLogEl.value.scrollHeight;
+}, { deep: true });
+const pieResults = ref<PieExtensionInfo[]>([]);
+const pieSearching = ref(false);
+const pieInstallingPkg = ref<string>("");
+
+const showingRecommended = computed(() => pieKw.value.trim().length === 0);
+
+async function openPieInstall() {
+  if (!selectedPhp.value) { showError("请先选择 PHP 版本"); return; }
+  pieKw.value = "";
+  pieResults.value = [];
+  showPieModal.value = true;
+  try { pieRuntime.value = await invoke<PieRuntimeInfo>("pie_runtime_info"); }
+  catch (e) { showError("PIE 状态查询失败: " + e); }
+}
+
+async function runPieSearch() {
+  if (!pieKw.value.trim()) { pieResults.value = []; return; }
+  pieSearching.value = true;
+  try { pieResults.value = await invoke<PieExtensionInfo[]>("pie_search", { keyword: pieKw.value.trim() }); }
+  catch (e) { showError("搜索失败: " + e); pieResults.value = []; }
+  finally { pieSearching.value = false; }
+}
+
+async function copyPieLog() {
+  const text = pieInstallLog.value.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success("已复制安装日志");
+  } catch {
+    showError("复制失败");
+  }
+}
+
+async function doPieInstall(pkg: string) {
+  if (!selectedPhp.value) return;
+  pieInstallingPkg.value = pkg;
+  pieInstallLog.value = [`▶ 开始安装 ${pkg} 到 ${selectedPhp.value.label}…`];
+  // 监听后端 pie-install-log event
+  if (pieLogUnlisten) { pieLogUnlisten(); pieLogUnlisten = null; }
+  pieLogUnlisten = await listen<string>("pie-install-log", (e) => {
+    // PIE 输出含 ANSI 颜色码（\x1b[33m...），直接显示是乱码 → strip
+    const clean = e.payload.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+    pieInstallLog.value.push(clean);
+  });
+  try {
+    await invoke("pie_install", { package: pkg, targetPhpInstallPath: selectedPhp.value.install_path });
+    pieInstallLog.value.push(`✓ 安装完成`);
+    toast.success(`扩展 ${pkg} 已安装。重启 PHP 后生效。`);
+    await loadPhpExts();
+    // 给用户一个查看日志的机会，不立即关闭
+    setTimeout(() => { showPieModal.value = false; }, 1500);
+  } catch (e) {
+    pieInstallLog.value.push(`✗ 失败: ${e}`);
+    showError("安装失败: " + e);
+  } finally {
+    pieInstallingPkg.value = "";
+    if (pieLogUnlisten) { pieLogUnlisten(); pieLogUnlisten = null; }
+  }
+}
 const phpInstanceOptions = computed(() => phpInstances.value.map((inst) => ({ label: inst.label, value: inst.id })));
 function selectPhpInstance(id: string | number | boolean | null) {
   selectedPhp.value = phpInstances.value.find(i => i.id === id) || null;
@@ -413,7 +528,12 @@ onMounted(() => {
 
       <!-- Extensions -->
       <div v-if="phpSubTab === 'extensions'">
-        <div class="py-2.5 text-[16px] text-content-muted border-b border-border mb-1.5">切换开关启用/禁用扩展，修改后需重启 PHP 生效</div>
+        <div class="flex items-center justify-between py-2.5 text-[16px] text-content-muted border-b border-border mb-1.5">
+          <span>切换开关启用/禁用扩展，修改后需重启 PHP 生效</span>
+          <button class="btn btn-primary btn-sm flex items-center gap-1" @click="openPieInstall">
+            <Plus :size="14" /> 安装新扩展
+          </button>
+        </div>
         <div v-for="ext in phpExts" :key="ext.file_name" class="flex items-center gap-3 py-2.5 border-b border-border last:border-b-0 hover:bg-surface-hover -mx-2 px-2 rounded transition-colors">
           <label class="toggle-wrap"><input type="checkbox" :checked="ext.enabled" :disabled="busy" @change="toggleExt(ext)" /><span class="toggle-slider"></span></label>
           <span class="text-[16px]">{{ ext.name }}</span>
@@ -521,6 +641,115 @@ onMounted(() => {
           <button class="btn btn-secondary btn-sm" @click="showLog = false">关闭</button>
         </div>
         <pre class="input font-mono text-[13px] whitespace-pre-wrap overflow-y-auto" style="max-height: 60vh; min-height: 200px">{{ logContent || '(日志为空)' }}</pre>
+      </div>
+    </div>
+
+    <!-- PIE Install Modal -->
+    <div v-if="showPieModal" class="modal-overlay" @click.self="showPieModal = false">
+      <div class="modal-content" style="width: 720px">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-base font-semibold">通过 PIE 安装 PHP 扩展</div>
+          <button class="btn btn-secondary btn-sm" @click="showPieModal = false">关闭</button>
+        </div>
+
+        <div v-if="selectedPhp" class="text-[13px] mb-2" style="color: var(--text-secondary)">
+          目标 PHP：<b>{{ selectedPhp.label }}</b>
+          <span style="color: var(--text-muted)">（{{ selectedPhp.install_path }}）</span>
+        </div>
+
+        <div v-if="pieRuntime && !pieRuntime.runtime_php_path"
+             class="text-[13px] p-3 rounded mb-3"
+             style="background: var(--bg-tertiary); border: 1px solid var(--color-danger); color: var(--text-primary)">
+          ⚠️ 未找到 PHP 8.1 或更高版本，PIE 无法运行。请先到「软件商店」安装 PHP ≥ 8.1。
+          PIE 需要高版本 PHP 当 runtime，但可以装扩展到任意 PHP 版本（包括你当前选的）。
+        </div>
+        <div v-else-if="pieRuntime" class="text-[12px] mb-3" style="color: var(--text-muted)">
+          PIE runtime：PHP {{ pieRuntime.runtime_version }}
+        </div>
+
+        <div class="flex gap-2 mb-3">
+          <input class="input flex-1" v-model="pieKw" placeholder="搜索其他扩展（清空显示精选列表）"
+                 @keyup.enter="runPieSearch" :disabled="!pieRuntime?.runtime_php_path" />
+          <button class="btn btn-primary btn-sm flex items-center gap-1"
+                  :disabled="pieSearching || !pieRuntime?.runtime_php_path"
+                  @click="runPieSearch">
+            <Search :size="14" />
+            {{ pieSearching ? '搜索中…' : '搜索' }}
+          </button>
+        </div>
+
+        <!-- 精选列表（默认） -->
+        <div v-if="showingRecommended && pieRuntime?.runtime_php_path" class="overflow-y-auto" style="max-height: 50vh">
+          <div class="text-[12px] mb-2" style="color: var(--text-muted)">精选扩展</div>
+          <div v-for="r in recommendedExts" :key="r.name"
+               class="flex items-center gap-2 py-2.5 border-b border-border">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-[14px] font-medium" style="color: var(--text-primary)">{{ r.display }}</span>
+                <span class="text-[11px] px-1.5 py-px rounded"
+                      style="background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border-color)">{{ r.category }}</span>
+              </div>
+              <div class="text-[12px] mt-0.5" style="color: var(--text-muted)">{{ r.description }}</div>
+              <div class="text-[11px] mt-0.5" style="color: var(--text-muted); font-family: var(--font-mono)">{{ r.name }}</div>
+            </div>
+            <span v-if="isExtInstalled(r.ext)"
+                  class="text-[12px] px-2 py-1 rounded shrink-0"
+                  style="background: var(--bg-tertiary); color: var(--color-success); border: 1px solid var(--color-success)">
+              ✓ 已安装
+            </span>
+            <span v-else-if="!compatHint(r).ok"
+                  class="text-[12px] px-2 py-1 rounded shrink-0"
+                  style="background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border-color)"
+                  :title="compatHint(r).hint">
+              ✗ {{ compatHint(r).hint }}
+            </span>
+            <button v-else
+                    class="btn btn-success btn-sm flex items-center gap-1 shrink-0"
+                    :disabled="!!pieInstallingPkg"
+                    @click="doPieInstall(r.name)">
+              <Download :size="12" />
+              {{ pieInstallingPkg === r.name ? '安装中…' : '安装' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 搜索结果 -->
+        <div v-else-if="!showingRecommended && pieResults.length > 0" class="overflow-y-auto" style="max-height: 50vh">
+          <div class="text-[12px] mb-2" style="color: var(--text-muted)">
+            搜索结果 · 注意：非精选扩展可能不支持 Windows，安装失败属正常
+          </div>
+          <div v-for="r in pieResults" :key="r.name"
+               class="flex items-start gap-2 py-2.5 border-b border-border">
+            <div class="flex-1 min-w-0">
+              <div class="text-[14px] font-medium" style="color: var(--text-primary); font-family: var(--font-mono)">{{ r.name }}</div>
+              <div v-if="r.description" class="text-[12px] mt-1" style="color: var(--text-muted); word-break: break-word">{{ r.description }}</div>
+            </div>
+            <button class="btn btn-success btn-sm flex items-center gap-1 shrink-0"
+                    :disabled="!!pieInstallingPkg"
+                    @click="doPieInstall(r.name)">
+              <Download :size="12" />
+              {{ pieInstallingPkg === r.name ? '安装中…' : '安装' }}
+            </button>
+          </div>
+        </div>
+        <div v-else-if="!showingRecommended && !pieSearching && pieRuntime?.runtime_php_path"
+             class="text-center py-8 text-[13px]" style="color: var(--text-muted)">
+          没有匹配的扩展
+        </div>
+
+        <!-- 实时日志（安装中或刚装完） -->
+        <div v-if="pieInstallLog.length > 0" class="mt-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[12px]" style="color: var(--text-muted)">安装日志</span>
+            <button class="btn btn-secondary btn-sm flex items-center gap-1 !px-2 !py-0.5"
+                    @click="copyPieLog" title="复制全部日志">
+              <Copy :size="12" /> 复制全部
+            </button>
+          </div>
+          <pre class="font-mono text-[12px] p-2.5 rounded overflow-y-auto"
+               ref="pieLogEl"
+               style="background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-color); max-height: 240px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; user-select: text; -webkit-user-select: text; cursor: text">{{ pieInstallLog.join('\n') }}</pre>
+        </div>
       </div>
     </div>
   </div>
