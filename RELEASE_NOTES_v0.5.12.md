@@ -1,0 +1,39 @@
+## NaxOne v0.5.12
+
+### ✨ 新增
+
+- **Webman 站点模板**：新建站点时可选 Webman（cli 常驻框架），自动配 nginx `proxy_pass http://127.0.0.1:8787`，装完日志区提示双击 `windows.bat` 启动
+- **活动日志归档**：模板装包过程（含完整 stdout/stderr）会自动写入「活动日志」，关闭 modal 后仍可在仪表板「活动日志 → 查看全部」回查
+
+### 🐛 Bug 修复
+
+- 修复模板装包总报"目录非空"的连环问题：
+  - NaxOne 自家在 `document_root` 写的 `nginx.htaccess` / `.htaccess` 被误判为用户内容
+  - composer 自身的目录非空检查也撞同一坑
+  - 修复：`init_site_template` 校验时白名单忽略两个 htaccess；composer 跑之前临时移除、跑完再放回
+- 修复模板初始化**失败**后仍显示"Webman cli 启动…"等成功提示
+- 修复表单"浏览"按钮 dialog 不跳到当前 `document_root`（加了 `defaultPath`）
+
+### 🎨 UI
+
+- 删除站点的系统原生对话框 → 替换为毛玻璃 ConfirmDialog（与全局风格一致）
+- 模板初始化 modal 顶部新增进度条 + 阶段标签 + 已用秒数 spinner（下载/解压实时进度）
+- composer 输出的 ANSI 颜色码 strip 干净（不再显示 `[32m` 乱码）
+
+### 📋 项目规范
+
+- CLAUDE.md 新增「操作日志规范」：所有用户主动写操作必须 push_log 到活动日志（Info 开始 + Success 完成 + Error 失败 + details）
+- `template.rs` / `pie.rs::pie_install` / `port.rs::kill_process_by_pid` 三处补齐日志
+
+### ✅ 测试
+
+新增 4 个 e2e spec，13 个用例全过：
+- `template-init.spec.ts` — 后端命令单元用例（7/7）
+- `template-fail-ui.spec.ts` — 失败时 UI 不误导显示（1/1）
+- `template-real-user.spec.ts` — GUI 真实链路（NaxOne 写 htaccess 后模板能装下去）（1/1）
+- `activity-log.spec.ts` — 操作日志规范验证（3/3）
+
+### 升级方式
+
+已在用 NaxOne 的，下次启动会自动收到更新提示。
+新装请下载附件 `NaxOne_0.5.12_x64-setup.exe` 双击安装。

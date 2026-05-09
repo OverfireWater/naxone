@@ -114,9 +114,11 @@ def create_release(session: requests.Session, tag: str, name: str, body: str) ->
     return request_json(session, "POST", f"{API}/repos/{OWNER}/{REPO}/releases", data=payload)
 
 
-def update_release(session: requests.Session, release_id: int, name: str, body: str) -> dict[str, Any]:
+def update_release(session: requests.Session, release_id: int, tag: str, name: str, body: str) -> dict[str, Any]:
+    # Gitee PATCH 要求 tag_name 必填（即便不变也要传），漏了报 400 "tag_name is missing"
     payload = {
         "access_token": session.headers.get("Authorization", "").split(" ", 1)[-1],
+        "tag_name": tag,
         "name": name,
         "body": body,
     }
@@ -300,7 +302,7 @@ def main() -> int:
             release = create_release(session, tag, f"NaxOne v{version}", body)
             print(f"Gitee release 已创建 id={release['id']}")
         else:
-            release = update_release(session, release["id"], f"NaxOne v{version}", body)
+            release = update_release(session, release["id"], tag, f"NaxOne v{version}", body)
             print(f"Gitee release 已更新 id={release['id']}")
 
         release_id = release["id"]
