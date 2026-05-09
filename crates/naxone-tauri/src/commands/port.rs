@@ -8,8 +8,13 @@ use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use serde::Serialize;
+use tauri::State;
 
 use naxone_adapters::process::windows::{get_process_exe_path, get_process_name};
+use naxone_core::domain::log::LogLevel;
+
+use crate::commands::logger::push_log;
+use crate::state::AppState;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -103,10 +108,17 @@ fn identify_source(exe_path: Option<&str>) -> Option<String> {
 }
 
 #[tauri::command]
-pub async fn kill_process_by_pid(pid: u32) -> Result<(), String> {
+pub async fn kill_process_by_pid(
+    pid: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     if pid == 0 {
+        push_log(&state, LogLevel::Error, "port", "结束进程失败：PID 无效", None, None).await;
         return Err("PID 无效".into());
     }
+    // 拿一下进程名加进日志，方便用户回溯
+    let proc_name = get_process_name(pid).await.unwrap_or_else(|| "(未知)".to_string());
+
     let output = Command::new("taskkill")
         .args(["/F", "/PID"])
         .arg(pid.to_string())
@@ -115,16 +127,32 @@ pub async fn kill_process_by_pid(pid: u32) -> Result<(), String> {
         .map_err(|e| format!("调用 taskkill 失败: {}", e))?;
 
     if output.status.success() {
+        push_log(
+            &state,
+            LogLevel::Success,
+            "port",
+            format!("结束进程 {} (PID {})", proc_name, pid),
+            None,
+            None,
+        )
+        .await;
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Err(format!(
-        "结束进程失败: {}",
-        if !stderr.trim().is_empty() {
-            stderr.trim().to_string()
-        } else {
-            stdout.trim().to_string()
-        }
-    ))
+    let detail = if !stderr.trim().is_empty() {
+        stderr.trim().to_string()
+    } else {
+        stdout.trim().to_string()
+    };
+    push_log(
+        &state,
+        LogLevel::Error,
+        "port",
+        format!("结束进程 {} (PID {}) 失败", proc_name, pid),
+        Some(detail.clone()),
+        None,
+    )
+    .await;
+    Err(format!("结束进程失败: {}", detail))
 }

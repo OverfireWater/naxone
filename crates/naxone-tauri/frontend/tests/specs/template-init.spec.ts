@@ -150,6 +150,38 @@ describe("v0.5.11 站点模板初始化", () => {
   });
 
   // ───────────────────────────────────────
+  describe.skip("[7] Webman 模板（实测 composer create-project workerman/webman）", () => {
+    const dir = mkEmptyDir("webman");
+
+    it("init_site_template(webman) 完成", async function () {
+      this.timeout(300_000);
+      let r: { ok: boolean; error?: string };
+      try {
+        r = await browser.execute((target: string) =>
+          window.__TAURI__!.core
+            .invoke("init_site_template", { targetDir: target, template: "webman" })
+            .then(() => ({ ok: true }))
+            .catch((e: unknown) => ({ ok: false, error: String(e) })),
+          dir,
+        );
+      } catch (e) {
+        r = { ok: false, error: String(e) };
+      }
+      if (!r.ok) console.log("Webman install error:", r.error);
+      expect(r.ok).toBe(true);
+    });
+
+    it("Webman 入口文件齐", () => {
+      expect(fs.existsSync(path.join(dir, "start.php"))).toBe(true);
+      expect(fs.existsSync(path.join(dir, "windows.php"))).toBe(true);
+      expect(fs.existsSync(path.join(dir, "composer.json"))).toBe(true);
+      expect(fs.existsSync(path.join(dir, "vendor"))).toBe(true);
+      expect(fs.existsSync(path.join(dir, "app"))).toBe(true);
+      expect(fs.existsSync(path.join(dir, "config"))).toBe(true);
+    });
+  });
+
+  // ───────────────────────────────────────
   describe.skip("[6] Laravel 模板（实测 composer create-project）", () => {
     const dir = mkEmptyDir("laravel");
 

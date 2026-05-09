@@ -33,6 +33,7 @@ const rewritePresets = [
   { label: "ThinkPHP", value: "location / {\n    if (!-e $request_filename) {\n        rewrite ^(.*)$ /index.php?s=$1 last;\n        break;\n    }\n}" },
   { label: "Laravel", value: "location / {\n    try_files $uri $uri/ /index.php?$query_string;\n}" },
   { label: "WordPress", value: "location / {\n    try_files $uri $uri/ /index.php?$args;\n}" },
+  { label: "Webman", value: "location / {\n    proxy_pass http://127.0.0.1:8787;\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n}" },
   { label: "自定义", value: "__custom__" },
 ];
 
@@ -42,6 +43,7 @@ const templateOptions = [
   { label: "WordPress（中文）", value: "wordpress" },
   { label: "Laravel", value: "laravel" },
   { label: "ThinkPHP", value: "thinkphp" },
+  { label: "Webman（cli 常驻）", value: "webman" },
 ];
 const boolOptions = [
   { label: "关闭", value: false },
@@ -256,9 +258,10 @@ async function saveVhost() {
   await doSaveVhost();
 }
 
-/// Laravel / ThinkPHP 真实入口在项目根下的 public/，模板装完后自动指向那里，否则浏览器看到一堆裸文件找不到 index.php
+/// 框架真实入口在项目根下的 public/，模板装完后自动指向那里，否则浏览器看到一堆裸文件找不到入口
+/// Webman 也用 public（nginx 走 proxy_pass 不依赖目录，但保留 public 让静态资源走 nginx 直出）
 function entrySubdirForTemplate(t: string): string {
-  return t === "laravel" || t === "thinkphp" ? "public" : "";
+  return ["laravel", "thinkphp", "webman"].includes(t) ? "public" : "";
 }
 
 /// 选模板时自动配上对应伪静态（用户去"伪静态" tab 能看到，可手改）
@@ -266,6 +269,7 @@ const templateToRewriteLabel: Record<string, string> = {
   laravel: "Laravel",
   thinkphp: "ThinkPHP",
   wordpress: "WordPress",
+  webman: "Webman",
 };
 watch(initTemplate, (val) => {
   if (editingId.value) return; // 编辑模式不自动改
@@ -275,6 +279,10 @@ watch(initTemplate, (val) => {
   if (preset) {
     rewritePreset.value = preset.value;
     form.value.rewrite_rule = preset.value;
+  }
+  // Webman 走 proxy_pass，不需要 nginx 拉 fastcgi → 把 PHP 版本清空，避免生成无效 fastcgi 块
+  if (val === "webman") {
+    form.value.php_version = null;
   }
 });
 
@@ -291,7 +299,8 @@ async function doSaveVhost() {
     showForm.value = false; editingId.value = null; editingSource.value = "";
     showSuccess(isEdit ? "站点更新成功，已自动 reload Web 服务器" : "站点创建成功，已自动 reload Web 服务器");
     if (templateToInit) {
-      await runTemplateInit(projectRoot, templateToInit);
+      const ok = await runTemplateInit(projectRoot, templateToInit);
+      if (!ok) return; // 模板失败：不再追加误导性的 webman/入口子目录提示
       const subdir = entrySubdirForTemplate(templateToInit);
       if (subdir) {
         const newRoot = `${projectRoot}/${subdir}`.replace(/\\/g, "/").replace(/\/+/g, "/");
@@ -305,6 +314,15 @@ async function doSaveVhost() {
           showError(`自动设置入口目录失败，请手动改 nginx root: ${e}`);
         }
       }
+      // Webman 是常驻 cli 进程，nginx 仅做 proxy_pass，必须用户手动起
+      if (templateToInit === "webman") {
+        templateLogs.value.push("");
+        templateLogs.value.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        templateLogs.value.push("⚠ Webman 是常驻 cli 进程，需手动启动：");
+        templateLogs.value.push(`  cd ${projectRoot}`);
+        templateLogs.value.push("  双击 windows.bat 或运行 php windows.php");
+        templateLogs.value.push("启动后浏览器访问本站点即可（nginx 已配 proxy 到 :8787）");
+      }
     }
   } catch (e) { showError("保存失败: " + e); } finally { busy.value = false; }
 }
@@ -314,7 +332,7 @@ function copyTemplateLogs() {
   showFloat("日志已复制");
 }
 
-async function runTemplateInit(targetDir: string, template: string) {
+async function runTemplateInit(targetDir: string, template: string): Promise<boolean> {
   showTemplateModal.value = true;
   templateLogs.value = [];
   templateBusy.value = true;
@@ -334,18 +352,26 @@ async function runTemplateInit(targetDir: string, template: string) {
   const unlistenProgress = await listen<TemplateProgress>("site-template-progress", (e) => {
     templateProgress.value = e.payload;
   });
+  let success = false;
   try {
     await invoke("init_site_template", { targetDir, template });
     templateProgress.value = { phase: "done" };
+    success = true;
   } catch (e) {
-    templateLogs.value.push(`✗ ${e}`);
-    showError("模板初始化失败: " + e);
+    const msg = String(e);
+    templateLogs.value.push(`✗ ${msg}`);
+    if (msg.includes("目录非空")) {
+      showError(`模板初始化失败：${targetDir} 已有内容。请先清空该目录或换个新目录再创建。`);
+    } else {
+      showError("模板初始化失败: " + msg);
+    }
   } finally {
     templateBusy.value = false;
     if (templateTimer !== null) { clearInterval(templateTimer); templateTimer = null; }
     unlistenLog();
     unlistenProgress();
   }
+  return success;
 }
 
 async function confirmTakeover() {

@@ -2,15 +2,22 @@
 //!
 //! 流程：前端创建 vhost 成功后，若用户选了非 None 模板，调用 init_site_template。
 //! 后端按模板分发，过程中通过 Tauri event "site-template-log" 流式推日志到前端。
+//! 所有过程同时写入 sink，结束时连同 push_log 一起写入活动日志（关掉 modal 后仍可回查）。
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
+
+use naxone_core::domain::log::LogLevel;
+
+use crate::commands::logger::push_log;
+use crate::state::AppState;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const WP_ZIP_URL: &str = "https://cn.wordpress.org/latest-zh_CN.zip";
@@ -22,10 +29,28 @@ pub enum SiteTemplate {
     Wordpress,
     Laravel,
     Thinkphp,
+    Webman,
 }
 
-fn emit_log(app: &AppHandle, line: String) {
-    let _ = app.emit("site-template-log", line);
+impl SiteTemplate {
+    fn label(&self) -> &'static str {
+        match self {
+            SiteTemplate::Blank => "空白",
+            SiteTemplate::Wordpress => "WordPress",
+            SiteTemplate::Laravel => "Laravel",
+            SiteTemplate::Thinkphp => "ThinkPHP",
+            SiteTemplate::Webman => "Webman",
+        }
+    }
+}
+
+type Sink = Arc<Mutex<Vec<String>>>;
+
+fn emit_log(app: &AppHandle, sink: &Sink, line: String) {
+    let _ = app.emit("site-template-log", line.clone());
+    if let Ok(mut g) = sink.lock() {
+        g.push(line);
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -50,58 +75,138 @@ fn emit_progress(
     );
 }
 
+fn drain_sink(sink: &Sink) -> String {
+    sink.lock().map(|g| g.join("\n")).unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn init_site_template(
     app: AppHandle,
     target_dir: String,
     template: SiteTemplate,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let dir = PathBuf::from(&target_dir);
+    let label = template.label();
+
+    push_log(
+        &state,
+        LogLevel::Info,
+        "site-template",
+        format!("开始初始化 {} 模板 → {}", label, target_dir),
+        None,
+        None,
+    )
+    .await;
+
     if !dir.exists() {
-        return Err(format!("目录不存在: {}", target_dir));
+        let msg = format!("目录不存在: {}", target_dir);
+        push_log(
+            &state,
+            LogLevel::Error,
+            "site-template",
+            format!("{} 模板初始化失败", label),
+            Some(msg.clone()),
+            None,
+        )
+        .await;
+        return Err(msg);
     }
-    // 校验目录为空 —— 避免覆盖用户已有项目
-    let mut entries = std::fs::read_dir(&dir).map_err(|e| format!("读取目录失败: {}", e))?;
-    if entries.next().is_some() {
-        return Err("目录非空，请先清空再选择模板".into());
+    // 校验目录为空 —— 避免覆盖用户已有项目。
+    // 但 NaxOne 在 create_vhost 时会先写 nginx.htaccess / .htaccess（伪静态规则）到 document_root，
+    // 这俩是自家文件，不算"用户已有内容"，必须排除，否则刚 create_vhost 完模板就装不进去。
+    let real_files: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("读取目录失败: {}", e))?
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let s = name.to_string_lossy();
+            s != "nginx.htaccess" && s != ".htaccess"
+        })
+        .collect();
+    if !real_files.is_empty() {
+        let msg = "目录非空，请先清空再选择模板".to_string();
+        push_log(
+            &state,
+            LogLevel::Error,
+            "site-template",
+            format!("{} 模板初始化失败", label),
+            Some(format!("{}: {}", msg, dir.display())),
+            None,
+        )
+        .await;
+        return Err(msg);
     }
 
-    emit_log(&app, format!("▶ 开始初始化模板: {:?}", template));
-    emit_log(&app, format!("目标目录: {}", dir.display()));
+    let sink: Sink = Arc::new(Mutex::new(Vec::new()));
+
+    emit_log(&app, &sink, format!("▶ 开始初始化模板: {}", label));
+    emit_log(&app, &sink, format!("目标目录: {}", dir.display()));
 
     let result = match template {
         SiteTemplate::Blank => {
             emit_progress(&app, "running", None, None, None);
-            init_blank(&app, &dir).await
+            init_blank(&app, &sink, &dir).await
         }
-        SiteTemplate::Wordpress => init_wordpress(&app, &dir).await,
+        SiteTemplate::Wordpress => init_wordpress(&app, &sink, &dir).await,
         SiteTemplate::Laravel => {
             emit_progress(&app, "running", None, None, None);
-            init_composer(&app, &dir, "laravel/laravel").await
+            init_composer(&app, &sink, &dir, "laravel/laravel").await
         }
         SiteTemplate::Thinkphp => {
             emit_progress(&app, "running", None, None, None);
-            init_composer(&app, &dir, "topthink/think").await
+            init_composer(&app, &sink, &dir, "topthink/think").await
+        }
+        SiteTemplate::Webman => {
+            emit_progress(&app, "running", None, None, None);
+            init_composer(&app, &sink, &dir, "workerman/webman").await
         }
     };
 
     match &result {
-        Ok(_) => emit_log(&app, "✔ 初始化完成".to_string()),
-        Err(e) => emit_log(&app, format!("✗ 初始化失败: {}", e)),
+        Ok(_) => emit_log(&app, &sink, "✔ 初始化完成".to_string()),
+        Err(e) => emit_log(&app, &sink, format!("✗ 初始化失败: {}", e)),
     }
+
+    let full_log = drain_sink(&sink);
+    match &result {
+        Ok(_) => {
+            push_log(
+                &state,
+                LogLevel::Success,
+                "site-template",
+                format!("{} 模板初始化完成 → {}", label, dir.display()),
+                Some(full_log),
+                None,
+            )
+            .await
+        }
+        Err(e) => {
+            push_log(
+                &state,
+                LogLevel::Error,
+                "site-template",
+                format!("{} 模板初始化失败", label),
+                Some(format!("错误: {}\n\n──── 完整日志 ────\n{}", e, full_log)),
+                None,
+            )
+            .await
+        }
+    }
+
     result
 }
 
-async fn init_blank(app: &AppHandle, dir: &Path) -> Result<(), String> {
+async fn init_blank(app: &AppHandle, sink: &Sink, dir: &Path) -> Result<(), String> {
     let path = dir.join("index.php");
     let body = "<?php\nphpinfo();\n";
     std::fs::write(&path, body).map_err(|e| format!("写入 index.php 失败: {}", e))?;
-    emit_log(app, format!("已创建 {}", path.display()));
+    emit_log(app, sink, format!("已创建 {}", path.display()));
     Ok(())
 }
 
-async fn init_wordpress(app: &AppHandle, dir: &Path) -> Result<(), String> {
-    emit_log(app, format!("下载 WordPress: {}", WP_ZIP_URL));
+async fn init_wordpress(app: &AppHandle, sink: &Sink, dir: &Path) -> Result<(), String> {
+    emit_log(app, sink, format!("下载 WordPress: {}", WP_ZIP_URL));
     emit_progress(app, "downloading", Some(0), None, Some("MB"));
 
     let resp = reqwest::get(WP_ZIP_URL)
@@ -113,7 +218,6 @@ async fn init_wordpress(app: &AppHandle, dir: &Path) -> Result<(), String> {
     let total = resp.content_length();
     emit_progress(app, "downloading", Some(0), total, Some("MB"));
 
-    // 流式下载：每 1MB emit 一次进度，让用户看到下载在动
     let mut bytes: Vec<u8> = Vec::with_capacity(total.unwrap_or(25 * 1024 * 1024) as usize);
     let mut stream = resp.bytes_stream();
     let mut last_emit: u64 = 0;
@@ -130,10 +234,10 @@ async fn init_wordpress(app: &AppHandle, dir: &Path) -> Result<(), String> {
     emit_progress(app, "downloading", Some(downloaded), total.or(Some(downloaded)), Some("MB"));
     emit_log(
         app,
+        sink,
         format!("已下载 {:.1} MB，开始解压…", downloaded as f64 / 1024.0 / 1024.0),
     );
 
-    // 解压：每 100 个 entry emit 一次进度
     let cursor = std::io::Cursor::new(bytes.as_slice());
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|e| format!("zip 解析失败: {}", e))?;
@@ -150,7 +254,6 @@ async fn init_wordpress(app: &AppHandle, dir: &Path) -> Result<(), String> {
             None => continue,
         };
         let mut comps = name.components();
-        // 剥掉顶层 wordpress/
         match comps.next() {
             Some(c) if c.as_os_str() == "wordpress" => {}
             _ => continue,
@@ -182,19 +285,50 @@ async fn init_wordpress(app: &AppHandle, dir: &Path) -> Result<(), String> {
     }
     emit_progress(app, "extracting", Some(total_entries), Some(total_entries), Some("文件"));
 
-    emit_log(app, format!("已解压 {} 个文件", wrote));
-    emit_log(app, "提示：浏览器访问站点会进入 WordPress 安装向导".to_string());
+    emit_log(app, sink, format!("已解压 {} 个文件", wrote));
+    emit_log(app, sink, "提示：浏览器访问站点会进入 WordPress 安装向导".to_string());
     Ok(())
 }
 
-async fn init_composer(app: &AppHandle, dir: &Path, package: &str) -> Result<(), String> {
+async fn init_composer(app: &AppHandle, sink: &Sink, dir: &Path, package: &str) -> Result<(), String> {
+    // composer create-project 自己也校验目录必须空 —— NaxOne create_vhost 写过的
+    // nginx.htaccess / .htaccess 会让它拒绝。临时把这俩文件备份起来，跑完再放回。
+    let htaccess_names = ["nginx.htaccess", ".htaccess"];
+    let mut backups: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+    for name in htaccess_names {
+        let p = dir.join(name);
+        if p.exists() {
+            if let Ok(content) = std::fs::read(&p) {
+                backups.push((p.clone(), content));
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+
+    let result = run_composer_inner(app, sink, dir, package).await;
+
+    // 还原 htaccess（不管 composer 成功或失败都要恢复，否则下次启动 nginx reload 会找不到 htaccess 报 emerg）
+    for (p, content) in backups {
+        if !p.exists() {
+            let _ = std::fs::write(&p, &content);
+        }
+    }
+
+    result
+}
+
+async fn run_composer_inner(
+    app: &AppHandle,
+    sink: &Sink,
+    dir: &Path,
+    package: &str,
+) -> Result<(), String> {
     emit_log(
         app,
+        sink,
         format!("执行: composer create-project {} . --no-interaction", package),
     );
 
-    // Windows 上 composer 通常是 .bat，必须经 cmd.exe 才能执行；
-    // 同时 cmd.exe 会按 PATH 解析 composer，省去自己定位 composer.exe/.bat 的麻烦。
     let mut cmd = TokioCommand::new("cmd.exe");
     cmd.current_dir(dir)
         .arg("/C")
@@ -214,17 +348,26 @@ async fn init_composer(app: &AppHandle, dir: &Path, package: &str) -> Result<(),
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
 
     let app_out = app.clone();
+    let sink_out = sink.clone();
     let stdout_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = app_out.emit("site-template-log", line);
+            let _ = app_out.emit("site-template-log", line.clone());
+            if let Ok(mut g) = sink_out.lock() {
+                g.push(line);
+            }
         }
     });
     let app_err = app.clone();
+    let sink_err = sink.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = app_err.emit("site-template-log", format!("[stderr] {}", line));
+            let with_prefix = format!("[stderr] {}", line);
+            let _ = app_err.emit("site-template-log", with_prefix.clone());
+            if let Ok(mut g) = sink_err.lock() {
+                g.push(with_prefix);
+            }
         }
     });
 

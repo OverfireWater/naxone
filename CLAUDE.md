@@ -67,6 +67,18 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - 遇到问题追根因，不打补丁。每个决策都要能回答"为什么"。
 - 输出说重点，砍掉一切不改变决策的信息。
 
+## 操作日志规范
+
+所有用户主动触发的写操作（启停服务、创建/编辑/删除 vhost、装/卸扩展、装模板、改配置、kill 进程、改全局工具版本等）都必须写入活动日志（`push_log` 或 `logged` helper）：
+
+- **入口**：Info 级 `开始：XXX`（短流程可省）
+- **成功**：Success 级 `完成：XXX`，长流程（流式 stdout/stderr）把完整日志作为 `details`
+- **失败**：Error 级 `失败：XXX`，details 写完整错误信息或收集到的全部日志
+
+**不需要记的**：纯查询（`get_*` / `list_*` / `read_*` / `check_*` / `diagnose_*`）、本地打开（`open_in_browser` / `open_folder` / `open_file`）、状态轮询、版本检查。
+
+**理由**：modal / toast 关闭后所有过程信息应可从仪表板「活动日志」回查。Toast 是即时提示，活动日志是可回溯档案，两者必须一致。
+
 ## 提交规范
 
 每次执行 git commit 前必须 bump 版本号：

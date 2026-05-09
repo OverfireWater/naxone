@@ -13,7 +13,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
+use crate::commands::logger::push_log;
 use crate::state::AppState;
+use naxone_core::domain::log::LogLevel;
 use naxone_core::domain::service::{ServiceInstance, ServiceKind, ServiceOrigin};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -177,6 +179,42 @@ pub async fn pie_install(
     target_php_install_path: String,
     app: AppHandle,
     state: State<'_, AppState>,
+) -> Result<String, String> {
+    let label = format!("装 PHP 扩展 {} 到 {}", package, target_php_install_path);
+    push_log(&state, LogLevel::Info, "extension", format!("开始：{}", label), None, None).await;
+    let result = pie_install_inner(package, target_php_install_path, &app, &state).await;
+    match &result {
+        Ok(combined) => {
+            push_log(
+                &state,
+                LogLevel::Success,
+                "extension",
+                format!("完成：{}", label),
+                Some(combined.clone()),
+                None,
+            )
+            .await
+        }
+        Err(e) => {
+            push_log(
+                &state,
+                LogLevel::Error,
+                "extension",
+                format!("失败：{}", label),
+                Some(e.clone()),
+                None,
+            )
+            .await
+        }
+    }
+    result
+}
+
+async fn pie_install_inner(
+    package: String,
+    target_php_install_path: String,
+    app: &AppHandle,
+    state: &State<'_, AppState>,
 ) -> Result<String, String> {
     let services = state.services.read().await;
     let (runtime_php, _) = find_pie_runtime(&services)
