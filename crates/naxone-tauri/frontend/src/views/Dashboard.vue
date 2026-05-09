@@ -415,27 +415,29 @@ function parsePortConflict(err: string): { port: number; pid: number; exe: strin
   return { port: parseInt(m[1]), pid: parseInt(m[2]), exe: m[3].trim() };
 }
 
+/// 端口冲突 → 弹诊断对话框；否则返回 false 让调用方按普通错误处理。
+function tryShowPortConflict(id: string, err: unknown): boolean {
+  const conflict = parsePortConflict(String(err));
+  if (!conflict) return false;
+  const svc = services.value.find(s => s.id === id);
+  const exeBase = conflict.exe.split(/[\\/]/).pop() || conflict.exe;
+  portConflict.value = {
+    serviceId: id,
+    serviceName: svc ? `${svc.kind} v${svc.version}` : id,
+    port: conflict.port,
+    pid: conflict.pid,
+    processName: exeBase,
+    exePath: conflict.exe,
+  };
+  return true;
+}
+
 async function startService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
   try {
     services.value = await invokeWithTimeout("start_service", { id });
   } catch (e) {
-    const errStr = String(e);
-    const conflict = parsePortConflict(errStr);
-    if (conflict) {
-      const svc = services.value.find(s => s.id === id);
-      const exeBase = conflict.exe.split(/[\\/]/).pop() || conflict.exe;
-      portConflict.value = {
-        serviceId: id,
-        serviceName: svc ? `${svc.kind} v${svc.version}` : id,
-        port: conflict.port,
-        pid: conflict.pid,
-        processName: exeBase,
-        exePath: conflict.exe,
-      };
-    } else {
-      showError("启动失败: " + e);
-    }
+    if (!tryShowPortConflict(id, e)) showError("启动失败: " + e);
   } finally { busyIds.value.delete(id); }
 }
 
@@ -477,8 +479,10 @@ async function restartService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
   try {
     services.value = await invokeWithTimeout("restart_service", { id });
-  } catch (e) { showError("重启失败: " + e); }
-  finally { busyIds.value.delete(id); }
+  } catch (e) {
+    // 重启时 stop 已成功但 start 阶段端口被抢 → 走同一个端口冲突诊断流程
+    if (!tryShowPortConflict(id, e)) showError("重启失败: " + e);
+  } finally { busyIds.value.delete(id); }
 }
 
 async function startAll() {

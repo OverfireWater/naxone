@@ -20,15 +20,15 @@
   --border-focus: #6380ff;
   --text-primary: #e8ecf4;
   --text-secondary: #94a3b8;
-  --text-muted: #5b6b82;
+  --text-muted: #8593aa;
   --color-success: #22c55e;
   --color-success-light: #4ade80;
   --color-danger: #ef4444;
   --color-danger-hover: #f87171;
   --color-blue: #6380ff;
   --color-blue-light: #818cf8;
-  --color-gray: rgba(148, 163, 184, 0.15);
-  --color-gray-light: rgba(148, 163, 184, 0.25);
+  --color-gray: rgba(148, 163, 184, 0.20);
+  --color-gray-light: rgba(148, 163, 184, 0.40);
   --color-accent: #f59e0b;
   --color-warn: #fbbf24;
   --color-purple: #a855f7;
