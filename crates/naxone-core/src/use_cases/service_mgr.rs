@@ -126,8 +126,9 @@ impl ServiceManager {
         // Start the target service itself
         self.start_service(target).await?;
 
-        // If it's a web server, auto-start PHP-CGI instances
-        if is_web_server {
+        // 仅 Nginx 模式需要连带启 PHP-CGI 常驻：fastcgi_pass 必须有进程在 9000+ 监听。
+        // Apache 用 mod_fcgid，自己按需 fork php-cgi 子进程，无需主动启动。
+        if target.kind == ServiceKind::Nginx {
             for svc in all_services.iter_mut() {
                 if svc.kind == ServiceKind::Php && !svc.status.is_running() {
                     self.start_service(svc).await.map_err(|e| {
@@ -136,6 +137,34 @@ impl ServiceManager {
                             svc.version, e
                         ))
                     })?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 停止服务并处理依赖：
+    /// - Nginx 停止后连带停所有 PHP-CGI（fastcgi_pass 没人消费了）
+    /// - Apache 停止后无需处理（mod_fcgid 子进程随 apache 一起退）
+    /// PHP 停止失败只警告，不让整个停止操作 fail —— web 已停，PHP 状态不一致下次刷新会修正。
+    pub async fn stop_with_deps(
+        &self,
+        target: &mut ServiceInstance,
+        all_services: &mut [ServiceInstance],
+    ) -> Result<()> {
+        self.stop_service(target).await?;
+
+        if target.kind == ServiceKind::Nginx {
+            for svc in all_services.iter_mut() {
+                if svc.kind == ServiceKind::Php && svc.status.is_running() {
+                    if let Err(e) = self.stop_service(svc).await {
+                        tracing::warn!(
+                            version = %svc.version,
+                            error = %e,
+                            "联动停止 PHP-CGI 失败，继续",
+                        );
+                    }
                 }
             }
         }

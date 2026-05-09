@@ -191,15 +191,27 @@ pub async fn start_service(id: String, state: State<'_, AppState>) -> Result<Vec
 }
 
 #[tauri::command]
-pub async fn stop_service(id: String, state: State<'_, AppState>) -> Result<ServiceInfo, String> {
+pub async fn stop_service(id: String, state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, String> {
     let snapshot = { state.services.read().await.clone() };
     let idx = find_service_index(&snapshot, &id)?;
     let mut target = snapshot[idx].clone();
+    let mut others: Vec<_> = snapshot
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != idx)
+        .map(|(_, s)| s.clone())
+        .collect();
 
     let name = format!("{} {}", target.kind.display_name(), target.version);
     push_log(&state, LogLevel::Info, "service", format!("停止 {}", name), None, None).await;
 
-    match state.service_manager.stop_service(&mut target).await {
+    let result = if target.kind == ServiceKind::Nginx {
+        state.service_manager.stop_with_deps(&mut target, &mut others).await
+    } else {
+        state.service_manager.stop_service(&mut target).await
+    };
+
+    match result {
         Ok(_) => {
             push_log(
                 &state,
@@ -227,17 +239,15 @@ pub async fn stop_service(id: String, state: State<'_, AppState>) -> Result<Serv
     }
 
     let mut services = state.services.write().await;
-    if let Some(svc) = services.iter_mut().find(|s| s.id() == target.id()) {
-        *svc = target.clone();
-    }
-    Ok(to_info(&target))
+    sync_updated_statuses(&mut services, &target, &others);
+    Ok(all_infos(&services))
 }
 
 #[tauri::command]
 pub async fn restart_service(
     id: String,
     state: State<'_, AppState>,
-) -> Result<ServiceInfo, String> {
+) -> Result<Vec<ServiceInfo>, String> {
     let snapshot = { state.services.read().await.clone() };
     let idx = find_service_index(&snapshot, &id)?;
 
@@ -252,7 +262,14 @@ pub async fn restart_service(
     let name = format!("{} {}", target.kind.display_name(), target.version);
     push_log(&state, LogLevel::Info, "service", format!("重启 {}", name), None, None).await;
 
-    let result = if matches!(target.kind, ServiceKind::Nginx | ServiceKind::Apache) {
+    // Nginx 重启需要 PHP 跟着 stop+start（用户要求），走 stop_with_deps。
+    // Apache 不带 PHP，普通 stop+start_with_deps（start_with_deps 内部已对 apache 跳过 PHP 联动）。
+    let result = if target.kind == ServiceKind::Nginx {
+        match state.service_manager.stop_with_deps(&mut target, &mut others).await {
+            Err(e) => Err(e),
+            Ok(_) => state.service_manager.start_with_deps(&mut target, &mut others).await,
+        }
+    } else if target.kind == ServiceKind::Apache {
         if let Err(e) = state.service_manager.stop_service(&mut target).await {
             Err(e)
         } else {
@@ -291,7 +308,7 @@ pub async fn restart_service(
 
     let mut services = state.services.write().await;
     sync_updated_statuses(&mut services, &target, &others);
-    Ok(to_info(&target))
+    Ok(all_infos(&services))
 }
 
 #[tauri::command]
@@ -318,6 +335,8 @@ pub async fn start_all(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, S
         match kind {
             ServiceKind::Nginx if active_web != "nginx" => continue,
             ServiceKind::Apache if active_web != "apache" => continue,
+            // PHP 由 web server 启动时连带（仅 nginx 模式）；apache 自己 fork 不需要常驻 PHP。
+            ServiceKind::Php => continue,
             _ => {}
         }
 

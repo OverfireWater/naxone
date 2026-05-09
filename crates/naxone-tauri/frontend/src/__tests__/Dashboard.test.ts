@@ -16,8 +16,8 @@ const mocked = vi.hoisted(() => {
     if (cmd === "get_app_stats") return { pid: 9999, memory_mb: 88, uptime_secs: 12, is_dev: true };
     if (cmd === "check_for_updates") return { available: false, latest_version: "", current_version: "", release_url: "", release_notes: "", download_url: null };
     if (cmd === "start_service") return services;
-    if (cmd === "stop_service") return services[0];
-    if (cmd === "restart_service") return services[0];
+    if (cmd === "stop_service") return services;
+    if (cmd === "restart_service") return services;
     if (cmd === "start_all") return services;
     if (cmd === "stop_all") return services;
     if (cmd === "open_in_browser") return null;

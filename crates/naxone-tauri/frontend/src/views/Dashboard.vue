@@ -468,9 +468,7 @@ async function killAndRetryStart() {
 async function stopService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
   try {
-    const updated: ServiceInfo = await invokeWithTimeout("stop_service", { id });
-    const idx = services.value.findIndex(s => s.id === id);
-    if (idx >= 0) services.value[idx] = updated;
+    services.value = await invokeWithTimeout("stop_service", { id });
   } catch (e) { showError("停止失败: " + e); }
   finally { busyIds.value.delete(id); }
 }
@@ -478,9 +476,7 @@ async function stopService(id: string) {
 async function restartService(id: string) {
   busyIds.value.add(id); pauseAutoRefresh();
   try {
-    const updated: ServiceInfo = await invokeWithTimeout("restart_service", { id });
-    const idx = services.value.findIndex(s => s.id === id);
-    if (idx >= 0) services.value[idx] = updated;
+    services.value = await invokeWithTimeout("restart_service", { id });
   } catch (e) { showError("重启失败: " + e); }
   finally { busyIds.value.delete(id); }
 }
