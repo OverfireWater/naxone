@@ -120,6 +120,7 @@ fn main() {
             commands::pie::pie_install,
             commands::vhost::read_vhost_conf,
             commands::vhost::write_vhost_conf,
+            commands::template::init_site_template,
         ])
         .setup(|app| {
             // Dev 模式窗口标题加标识

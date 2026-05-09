@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
@@ -35,6 +35,14 @@ const rewritePresets = [
   { label: "WordPress", value: "location / {\n    try_files $uri $uri/ /index.php?$args;\n}" },
   { label: "自定义", value: "__custom__" },
 ];
+
+const templateOptions = [
+  { label: "无（不动目录）", value: "none" },
+  { label: "空白（phpinfo）", value: "blank" },
+  { label: "WordPress（中文）", value: "wordpress" },
+  { label: "Laravel", value: "laravel" },
+  { label: "ThinkPHP", value: "thinkphp" },
+];
 const boolOptions = [
   { label: "关闭", value: false },
   { label: "开启", value: true },
@@ -55,6 +63,42 @@ const showForm = ref(false);
 const editingId = ref<string | null>(null);
 const editingSource = ref<string>("");
 const showTakeover = ref(false);
+const pendingDelete = ref<VhostInfo | null>(null);
+
+// 站点模板初始化（仅新建时显示）
+const initTemplate = ref<string>("none");
+const showTemplateModal = ref(false);
+const templateLogs = ref<string[]>([]);
+const templateBusy = ref(false);
+interface TemplateProgress {
+  phase: "downloading" | "extracting" | "running" | "done";
+  current?: number;
+  total?: number;
+  unit?: string;
+}
+const templateProgress = ref<TemplateProgress | null>(null);
+const templateElapsed = ref<number>(0);
+let templateTimer: ReturnType<typeof setInterval> | null = null;
+
+function phaseLabel(p: TemplateProgress | null, busy: boolean): string {
+  if (!busy && p?.phase === "done") return "完成";
+  if (!p) return "准备中…";
+  return { downloading: "下载中", extracting: "解压中", running: "执行中", done: "完成" }[p.phase];
+}
+function progressPercent(p: TemplateProgress | null): number {
+  if (!p?.current || !p?.total) return 0;
+  return Math.min(100, Math.round((p.current / p.total) * 100));
+}
+function progressText(p: TemplateProgress | null): string {
+  if (!p || p.current === undefined) return "";
+  if (p.unit === "MB") {
+    const cur = (p.current / 1024 / 1024).toFixed(1);
+    const tot = p.total ? (p.total / 1024 / 1024).toFixed(1) : "?";
+    return `${cur} / ${tot} MB`;
+  }
+  if (p.unit === "文件") return `${p.current} / ${p.total ?? "?"} 文件`;
+  return "";
+}
 
 // Raw conf 编辑
 const showConfModal = ref(false);
@@ -140,6 +184,7 @@ function suggestedDocRoot(serverName: string): string {
 function openCreate() {
   editingId.value = null; modalTab.value = "basic"; rewritePreset.value = "";
   docRootTouched.value = false;
+  initTemplate.value = "none";
   // document_root 默认用 www_root，没配就留空让用户自己填
   const defaultRoot = wwwRoot.value ? `${wwwRoot.value}/` : "";
   form.value = { server_name: "", aliases: "", listen_port: 80, document_root: defaultRoot,
@@ -211,15 +256,96 @@ async function saveVhost() {
   await doSaveVhost();
 }
 
+/// Laravel / ThinkPHP 真实入口在项目根下的 public/，模板装完后自动指向那里，否则浏览器看到一堆裸文件找不到 index.php
+function entrySubdirForTemplate(t: string): string {
+  return t === "laravel" || t === "thinkphp" ? "public" : "";
+}
+
+/// 选模板时自动配上对应伪静态（用户去"伪静态" tab 能看到，可手改）
+const templateToRewriteLabel: Record<string, string> = {
+  laravel: "Laravel",
+  thinkphp: "ThinkPHP",
+  wordpress: "WordPress",
+};
+watch(initTemplate, (val) => {
+  if (editingId.value) return; // 编辑模式不自动改
+  const targetLabel = templateToRewriteLabel[val];
+  if (!targetLabel) return; // none / blank 不动当前规则
+  const preset = rewritePresets.find((p) => p.label === targetLabel);
+  if (preset) {
+    rewritePreset.value = preset.value;
+    form.value.rewrite_rule = preset.value;
+  }
+});
+
 async function doSaveVhost() {
   busy.value = true;
   try {
     const isEdit = !!editingId.value;
+    const templateToInit = !isEdit && initTemplate.value !== "none" ? initTemplate.value : null;
+    const projectRoot = form.value.document_root;
+    const formSnap = { ...form.value };
+    const vhostId = `${formSnap.server_name}_${formSnap.listen_port}`;
     if (isEdit) vhosts.value = await invoke("update_vhost", { id: editingId.value, req: form.value });
     else vhosts.value = await invoke("create_vhost", { req: form.value });
     showForm.value = false; editingId.value = null; editingSource.value = "";
     showSuccess(isEdit ? "站点更新成功，已自动 reload Web 服务器" : "站点创建成功，已自动 reload Web 服务器");
+    if (templateToInit) {
+      await runTemplateInit(projectRoot, templateToInit);
+      const subdir = entrySubdirForTemplate(templateToInit);
+      if (subdir) {
+        const newRoot = `${projectRoot}/${subdir}`.replace(/\\/g, "/").replace(/\/+/g, "/");
+        try {
+          vhosts.value = await invoke("update_vhost", {
+            id: vhostId,
+            req: { ...formSnap, document_root: newRoot },
+          });
+          showFloat(`已自动指向入口目录 ${subdir}/`);
+        } catch (e) {
+          showError(`自动设置入口目录失败，请手动改 nginx root: ${e}`);
+        }
+      }
+    }
   } catch (e) { showError("保存失败: " + e); } finally { busy.value = false; }
+}
+
+function copyTemplateLogs() {
+  navigator.clipboard.writeText(templateLogs.value.join("\n"));
+  showFloat("日志已复制");
+}
+
+async function runTemplateInit(targetDir: string, template: string) {
+  showTemplateModal.value = true;
+  templateLogs.value = [];
+  templateBusy.value = true;
+  templateProgress.value = null;
+  templateElapsed.value = 0;
+  const start = Date.now();
+  templateTimer = setInterval(() => {
+    templateElapsed.value = Math.round((Date.now() - start) / 1000);
+  }, 1000);
+
+  const { listen } = await import("@tauri-apps/api/event");
+  // composer 在 stderr 输出 ANSI 颜色码（如 \x1b[32m）让 <pre> 显示乱码，剥掉。
+  const ansiRe = /\x1b\[[0-9;]*[a-zA-Z]/g;
+  const unlistenLog = await listen<string>("site-template-log", (e) => {
+    templateLogs.value.push(e.payload.replace(ansiRe, ""));
+  });
+  const unlistenProgress = await listen<TemplateProgress>("site-template-progress", (e) => {
+    templateProgress.value = e.payload;
+  });
+  try {
+    await invoke("init_site_template", { targetDir, template });
+    templateProgress.value = { phase: "done" };
+  } catch (e) {
+    templateLogs.value.push(`✗ ${e}`);
+    showError("模板初始化失败: " + e);
+  } finally {
+    templateBusy.value = false;
+    if (templateTimer !== null) { clearInterval(templateTimer); templateTimer = null; }
+    unlistenLog();
+    unlistenProgress();
+  }
 }
 
 async function confirmTakeover() {
@@ -227,12 +353,13 @@ async function confirmTakeover() {
   await doSaveVhost();
 }
 
-async function deleteVhost(vh: VhostInfo) {
-  const ok = await confirm(
-    `确认删除站点 "${vh.server_name}:${vh.listen_port}"？\n\n将同时删除 Nginx + Apache 双向配置文件和 hosts 条目。此操作不可恢复（站点目录文件不会被删除，仅清理服务器配置）。`,
-    { title: "删除站点", kind: "warning" }
-  );
-  if (!ok) return;
+function deleteVhost(vh: VhostInfo) {
+  pendingDelete.value = vh;
+}
+
+async function confirmDelete() {
+  const vh = pendingDelete.value;
+  if (!vh) return;
   busy.value = true;
   try {
     vhosts.value = await invoke("delete_vhost", { id: vh.id });
@@ -241,10 +368,19 @@ async function deleteVhost(vh: VhostInfo) {
     showError("删除失败: " + e);
   } finally {
     busy.value = false;
+    pendingDelete.value = null;
   }
 }
 
-async function browseFolder() { const s = await open({ directory: true, multiple: false }); if (s) { form.value.document_root = s as string; docRootTouched.value = true; } }
+async function browseFolder() {
+  // 编辑/再次浏览时让 dialog 默认就跳到当前 document_root（或 wwwRoot 兜底）
+  const s = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: form.value.document_root || wwwRoot.value || undefined,
+  });
+  if (s) { form.value.document_root = s as string; docRootTouched.value = true; }
+}
 async function browseFile(field: "ssl_cert" | "ssl_key") { const s = await open({ directory: false, multiple: false, filters: [{ name: "证书", extensions: ["pem","crt","key","cer"] }] }); if (s) form.value[field] = s as string; }
 
 const sslBusy = ref(false);
@@ -382,6 +518,7 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
           <div class="fg"><label>PHP 版本</label><SelectMenu v-model="form.php_version" :options="phpVersionOptions" full-width trigger-class="input" /></div>
           <div class="fg"><label>默认首页</label><input class="input" v-model="form.index_files" placeholder="index.php index.html" /></div>
           <div class="fg"><label>到期日期 <span style="color:var(--text-muted);font-weight:400">留空永不过期</span></label><input class="input" type="date" v-model="form.expires_at" /></div>
+          <div v-if="!editingId" class="fg"><label>初始化模板 <span style="color:var(--text-muted);font-weight:400">仅在新建空目录时生效</span></label><SelectMenu v-model="initTemplate" :options="templateOptions" full-width trigger-class="input" /></div>
           <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">同步 Hosts</span><label class="toggle-wrap"><input type="checkbox" v-model="form.sync_hosts" /><span class="toggle-slider"></span></label></div>
         </div>
 
@@ -439,6 +576,32 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
       </div>
     </div>
 
+    <!-- ==================== Site Template Init Progress ==================== -->
+    <div v-if="showTemplateModal" class="modal-overlay" @click.self="!templateBusy && (showTemplateModal = false)">
+      <div class="modal-content" style="width: 720px">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-base font-semibold">{{ templateBusy ? '正在初始化站点…' : '初始化完成' }}</div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" :disabled="!templateLogs.length" @click="copyTemplateLogs">复制日志</button>
+            <button class="btn btn-secondary btn-sm" :disabled="templateBusy" @click="showTemplateModal = false">{{ templateBusy ? '初始化中…' : '关闭' }}</button>
+          </div>
+        </div>
+        <!-- 状态条：阶段标签 + 进度条 + 已用时间 -->
+        <div class="flex items-center gap-3 py-2 mb-2 border-b" style="border-color: var(--border-color)">
+          <span v-if="templateBusy" class="animate-spin inline-block w-3 h-3 rounded-full border-2 shrink-0" style="border-color: var(--color-blue) transparent var(--color-blue) transparent"></span>
+          <span v-else class="inline-block w-3 h-3 shrink-0" style="color: var(--color-success-light)">✓</span>
+          <span class="text-[13px]" style="color: var(--text-secondary); min-width: 56px">{{ phaseLabel(templateProgress, templateBusy) }}</span>
+          <div v-if="templateProgress?.current !== undefined && templateProgress?.total" class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--bg-tertiary)">
+            <div class="h-full transition-all duration-300" :style="{ width: progressPercent(templateProgress) + '%', background: 'var(--color-blue)' }"></div>
+          </div>
+          <div v-else class="flex-1"></div>
+          <span class="font-mono text-[12px]" style="color: var(--text-secondary)">{{ progressText(templateProgress) }}</span>
+          <span class="font-mono text-[12px]" style="color: var(--text-muted)">· {{ templateElapsed }}s</span>
+        </div>
+        <pre class="font-mono text-[12px] w-full" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; min-height: 50vh; max-height: 60vh; overflow-y: auto; white-space: pre-wrap; user-select: text; color: var(--text-secondary)">{{ templateLogs.join('\n') || '准备中...' }}</pre>
+      </div>
+    </div>
+
     <!-- ==================== Takeover Confirm ==================== -->
     <ConfirmDialog
       :open="showTakeover"
@@ -454,6 +617,27 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
         <li>在 PHPStudy 软件内对该站点的修改可能被 NaxOne 下次保存覆盖</li>
         <li>站点会从「PHPSTUDY 站点」分组移到「自建站点」分组</li>
       </ul>
+    </ConfirmDialog>
+
+    <!-- ==================== Delete Confirm ==================== -->
+    <ConfirmDialog
+      :open="!!pendingDelete"
+      title="删除站点"
+      variant="danger"
+      confirm-text="确认删除"
+      :busy="busy"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    >
+      <template v-if="pendingDelete">
+        确认删除站点 <b>{{ pendingDelete.server_name }}:{{ pendingDelete.listen_port }}</b>？
+        <div style="margin-top: 10px; color: var(--text-muted); font-size: 13px">
+          将同时删除 Nginx + Apache 双向配置文件和 hosts 条目。<b style="color: var(--color-danger-hover)">此操作不可恢复。</b>
+        </div>
+        <div style="margin-top: 6px; color: var(--text-muted); font-size: 13px">
+          站点目录文件不会被删除，仅清理服务器配置。
+        </div>
+      </template>
     </ConfirmDialog>
 
     <!-- ==================== List ==================== -->
