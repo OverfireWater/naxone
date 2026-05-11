@@ -254,7 +254,7 @@ async function loadRecentLogs() {
     const last = bgErrorAt.get("recent_logs") ?? 0;
     if (now - last > 15000) {
       bgErrorAt.set("recent_logs", now);
-      toast.warn(`日志刷新失败: ${e}`);
+      toast.error(`日志刷新失败: ${e}`);
     }
   }
 }
@@ -269,7 +269,7 @@ async function loadAppStats() {
     const last = bgErrorAt.get("app_stats") ?? 0;
     if (now - last > 15000) {
       bgErrorAt.set("app_stats", now);
-      toast.warn(`资源统计刷新失败: ${e}`);
+      toast.error(`资源统计刷新失败: ${e}`);
     }
   }
 }
@@ -302,7 +302,7 @@ async function checkForUpdates() {
     const last = bgErrorAt.get("updates") ?? 0;
     if (now - last > 30000) {
       bgErrorAt.set("updates", now);
-      toast.warn(`更新检查失败: ${e}`);
+      toast.error(`更新检查失败: ${e}`);
     }
   }
 }
@@ -370,7 +370,7 @@ async function loadGlobalPhp() {
     const last = bgErrorAt.get("global_php") ?? 0;
     if (now - last > 15000) {
       bgErrorAt.set("global_php", now);
-      toast.warn(`读取全局 PHP 失败: ${e}`);
+      toast.error(`读取全局 PHP 失败: ${e}`);
     }
   }
 }
@@ -394,7 +394,7 @@ async function loadDevTools() {
     const last = bgErrorAt.get("dev_tools") ?? 0;
     if (now - last > 15000) {
       bgErrorAt.set("dev_tools", now);
-      toast.warn(`读取开发工具信息失败: ${e}`);
+      toast.error(`读取开发工具信息失败: ${e}`);
     }
   }
 }

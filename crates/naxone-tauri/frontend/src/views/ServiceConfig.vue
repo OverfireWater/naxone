@@ -92,7 +92,21 @@ interface NginxConfig {
 }
 const nginx = ref<NginxConfig | null>(null);
 async function loadNginx() { try { nginx.value = await invoke("get_nginx_config"); } catch (e) { showError("加载 Nginx 配置失败: " + e); } }
-async function saveNginx() { if (!nginx.value || busy.value) return; busy.value = true; try { await invoke("save_nginx_config", { cfg: nginx.value }); showSaved(); } catch (e) { showError("保存失败: " + e); } finally { busy.value = false; } }
+async function saveNginx() {
+  if (!nginx.value || busy.value) return;
+  // 防呆：常见数值字段范围校验。让用户在保存前发现，而不是 nginx reload 时报 emerg。
+  const n = nginx.value;
+  if (n.gzip_level < 1 || n.gzip_level > 9) { showError("Gzip 等级必须在 1-9 之间"); return; }
+  if (n.gzip_min_length < 0) { showError("Gzip 最小压缩体积不能为负"); return; }
+  if (n.worker_connections < 1) { showError("最大连接数必须 ≥ 1"); return; }
+  if (n.worker_rlimit_nofile < 1) { showError("文件描述符限制必须 ≥ 1"); return; }
+  if (n.keepalive_timeout < 0) { showError("保活超时不能为负"); return; }
+  if (n.keepalive_requests < 1) { showError("单连接最大请求数必须 ≥ 1"); return; }
+  busy.value = true;
+  try { await invoke("save_nginx_config", { cfg: nginx.value }); showSaved(); }
+  catch (e) { showError("保存失败: " + e); }
+  finally { busy.value = false; }
+}
 
 // ======================== MySQL ========================
 interface MysqlConfig {
@@ -427,8 +441,8 @@ onMounted(() => {
       <div class="cfg-section">Gzip 压缩</div>
       <div class="cfg-grid">
         <div class="fg"><label>启用 Gzip <span class="k">gzip</span></label><SelectMenu v-model="nginx.gzip" :options="boolOptions" full-width trigger-class="input" /></div>
-        <div class="fg"><label>压缩等级(1-9) <span class="k">gzip_level</span></label><input class="input" type="number" v-model.number="nginx.gzip_level" min="1" max="9" /></div>
-        <div class="fg"><label>最小压缩体积(字节) <span class="k">gzip_min_length</span></label><input class="input" type="number" v-model.number="nginx.gzip_min_length" /></div>
+        <div class="fg"><label>压缩等级(1-9) <span class="k">gzip_level</span></label><input class="input" type="number" v-model.number="nginx.gzip_level" min="1" max="9" step="1" /></div>
+        <div class="fg"><label>最小压缩体积(字节) <span class="k">gzip_min_length</span></label><input class="input" type="number" v-model.number="nginx.gzip_min_length" min="0" step="1" /></div>
       </div>
     </div>
 

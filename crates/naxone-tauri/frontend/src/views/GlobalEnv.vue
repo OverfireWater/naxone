@@ -161,7 +161,7 @@ async function switchNode() {
   try {
     const result: NvmToolInfo = await invoke("switch_node_version", { version: nodePick.value });
     devTools.value = { ...devTools.value, nvm: result };
-    toast.success(`Node.js 已切换到 v${result.current_node ?? nodePick.value}`);
+    toast.success(`Node.js 已切到 v${result.current_node ?? nodePick.value}。请新开 cmd 跑 \`node -v\` 验证。`);
   } catch (e) { showError(`切换失败: ${e}`); }
   finally { nodeSwitchBusy.value = false; }
 }
@@ -172,7 +172,7 @@ async function switchComposer() {
   try {
     const result: DevToolsInfo = await invoke("set_global_composer", { version: composerPick.value });
     devTools.value = result;
-    toast.success(`Composer 全局版本已切到 v${composerPick.value}`);
+    toast.success(`Composer 已切到 v${composerPick.value}。请新开 cmd 跑 \`composer -V\` 验证。`);
   } catch (e) { showError(`切换失败: ${e}`); }
   finally { composerSwitchBusy.value = false; }
 }
@@ -183,7 +183,7 @@ async function switchMysql() {
   try {
     const result: DevToolsInfo = await invoke("set_global_mysql", { version: mysqlPick.value });
     devTools.value = result;
-    toast.success(`MySQL 全局版本已切到 v${mysqlPick.value}`);
+    toast.success(`MySQL 已切到 v${mysqlPick.value}。请新开 cmd 跑 \`mysql --version\` 验证。⚠ 不同 MySQL 实例的 root 密码可能不同，请到下方"MySQL 密码"重新查看/设置。`);
   } catch (e) { showError(`切换失败: ${e}`); }
   finally { mysqlSwitchBusy.value = false; }
 }
