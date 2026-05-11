@@ -4,203 +4,173 @@
 
 # NaxOne
 
-**One-stop local development environment** · Rewritten in Rust, packaged with Tauri, modern UI in Vue
+**One-stop local dev environment for Windows** · Rust + Tauri 2 + Vue 3
 
 [![License: MIT](https://img.shields.io/github/license/OverfireWater/naxone?color=blue)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/OverfireWater/naxone?label=release&color=brightgreen)](https://github.com/OverfireWater/naxone/releases)
 [![GitHub downloads](https://img.shields.io/github/downloads/OverfireWater/naxone/total?label=downloads&color=orange)](https://github.com/OverfireWater/naxone/releases)
 [![GitHub stars](https://img.shields.io/github/stars/OverfireWater/naxone?style=flat&label=GitHub%20stars)](https://github.com/OverfireWater/naxone/stargazers)
 [![Gitee stars](https://gitee.com/kz_y/naxone/badge/star.svg?theme=dark)](https://gitee.com/kz_y/naxone/stargazers)
-[![Gitee forks](https://gitee.com/kz_y/naxone/badge/fork.svg?theme=dark)](https://gitee.com/kz_y/naxone/members)
 
-[Download (Gitee)](https://gitee.com/kz_y/naxone/releases/latest) · [Download (GitHub)](https://github.com/OverfireWater/naxone/releases/latest) · [Issues](https://github.com/OverfireWater/naxone/issues)
-
-[中文版 README](README.md) · **English**
+[Download from Gitee](https://gitee.com/kz_y/naxone/releases/latest) · [Download from GitHub](https://github.com/OverfireWater/naxone/releases/latest) · [Issues](https://github.com/OverfireWater/naxone/issues) · [中文](README.md)
 
 </div>
 
 ---
 
-NaxOne is a Windows local development environment manager built for PHP developers. A single native desktop app puts Nginx, Apache, MySQL, Redis, and multiple PHP versions in one panel — start/stop, configuration, virtual hosts, and SSL all handled in one place.
+A Windows desktop app built for PHP developers. **One panel** to manage Nginx / Apache / MySQL / Redis / multi-version PHP — services, virtual hosts, SSL, config editing, one-click site templates, all in one place.
 
-Stack: **Rust + Tauri 2 + Vue 3 + TypeScript**. Cold start < 1s, resident memory < 100MB, installer around 6MB.
+Cold start < 1s · Resident memory < 100MB · Installer 6MB · Defaults to `D:\NaxOne`
 
-> **How does it relate to PHPStudy?** NaxOne **does not depend on PHPStudy** — it can be installed and run standalone. But if PHPStudy is **already on your machine**, NaxOne automatically detects its install directory and PHP/Nginx/MySQL packages, bringing them under management without reinstalling and without breaking existing sites. The two coexist peacefully.
+> 💡 **Coexists with PHPStudy**: NaxOne does not depend on PHPStudy and runs standalone. If PHPStudy is already on your machine, NaxOne auto-detects its PHP/Nginx/MySQL packages and brings them under management — no reinstall, no breaking existing sites.
 
-## Highlights
+## 📦 Install
 
-- **Service management**: One-click start/stop for Nginx / Apache / MySQL / Redis / PHP-CGI; Nginx and Apache are auto-mutually-exclusive; starting a web server auto-launches PHP-CGI; port probing + process name verification means no false positives.
-- **Virtual hosts**: Create / edit / delete sites; **dual-write** to both Nginx and Apache configs (zero cost to switch engines); auto-update `hosts` file; instant reload on save; rewrite presets (Laravel / ThinkPHP / WordPress / Webman); one-click mkcert HTTPS (auto-create local CA + sign leaf cert — browser shows the green lock directly).
-- **One-click site templates**: When creating a vhost, choose **Blank / WordPress / Laravel / ThinkPHP / Webman** — NaxOne downloads or runs `composer create-project` for you; framework projects auto-point to the `public/` entry subdirectory + matching rewrite preset + (Webman) proxy_pass.
-- **Multiple PHP versions**: Install many PHP versions locally, each site picks its own; one-click switch the global CLI `php` command (a shim is mounted on user PATH, takes effect in any new terminal). Composer / Node / MySQL version switching too.
-- **Service configuration**: Visual editor for 19 Nginx / 25 MySQL / 20 Redis / 34 PHP options; PHP extension toggles; `.bak` backup before every change; pre-save numeric range validation to avoid `nginx reload` emerg errors.
-- **Activity log**: Every write operation (start/stop / vhost CRUD / template install / extension install / version switch / kill process) is archived in the activity log panel — **keyword search, category filter, error rows highlighted**. Streaming logs (composer, WordPress download) keep the full stdout/stderr as `details` on the log entry, so you can review them after the modal closes.
-- **Software store**: Built-in PHP official source + GitHub mirror, on-demand download of historical versions, multi-mirror acceleration, SHA-256 verified.
-- **PHP extensions**: One-click install/uninstall via [PIE](https://github.com/php/pie); auto-picks PHP 8.1+ as runtime; streaming install log.
-- **Stranger process detection**: Dashboard automatically identifies external processes occupying ports 80/3306/6379 (including PHPStudy services) — kill with one click; service start failure due to port conflict auto-opens a diagnosis dialog.
-- **Modern experience**: Compact UI with glassmorphism, light/dark theme toggle, no native title bar, system tray minimization, Tauri auto-update.
+Download the latest installer for your region:
 
-## Screenshots
-
-### Dashboard
-Glassmorphism + ambient orbs. One-click start/stop for Nginx/Apache/MySQL/Redis, multi-version PHP managed in one row, recent activity log at the bottom.
-
-![Dashboard](docs/screenshots/01-dashboard.png)
-
-### New Site
-Three tabs: Basic config / Rewrite preset / SSL & advanced. Pick a WordPress / Laravel / ThinkPHP / Webman template for one-click scaffold, auto-sync hosts file, one-click HTTPS cert.
-
-![New site](docs/screenshots/03-vhosts-modal-basic.png)
-
-### Software Store
-Built-in multi-version downloads for PHP/Nginx/MySQL/etc., multi-mirror acceleration, SHA-256 verified.
-
-![Store](docs/screenshots/06-store.png)
-
-### Service Config · Nginx
-19 common Nginx options visualized, automatic `.bak` before every write.
-
-![Nginx config](docs/screenshots/08-config-nginx.png)
-
-### Global Environment
-One-click switch global CLI `php` / `composer` / `node` / `mysql` versions.
-
-![Global env](docs/screenshots/07-config-env.png)
-
-### Settings
-PHPStudy path / WWW root / ports / auto-start / theme.
-
-![Settings](docs/screenshots/13-settings.png)
-
-> More screenshots in [docs/screenshots/](docs/screenshots/) (13 total, covers every page).
-
-## Install
-
-Download the latest installer:
-
-| | Link |
+| Region | Link |
 |---|---|
 | China (recommended) | [Gitee Releases](https://gitee.com/kz_y/naxone/releases/latest) |
 | Worldwide | [GitHub Releases](https://github.com/OverfireWater/naxone/releases/latest) |
 
-File name `NaxOne_X.Y.Z_x64-setup.exe`, around 6 MB. NSIS installer, **defaults to `D:\NaxOne`** (falls back to `C:\NaxOne` if D: doesn't exist).
-
 Requires Windows 10 1809+ / Windows 11, x64.
 
-### First run: Windows SmartScreen warning
+<details>
+<summary>How to bypass the Windows SmartScreen warning on first run?</summary>
 
-The first time you run it, Windows may show:
+NaxOne doesn't ship with a paid code-signing certificate, so Windows may say "unrecognized app". Any of these:
 
-> Windows protected your PC
-> Microsoft Defender SmartScreen prevented an unrecognized app from starting…
-
-How to bypass (any of):
-
-1. In the popup click **More info** → **Run anyway**
+1. In the popup, click **More info** → **Run anyway**
 2. Right-click the .exe → **Properties** → check **Unblock** → OK
 3. PowerShell: `Unblock-File -Path "D:\NaxOne\NaxOne.exe"`
 
-## Build from source
+Only needed on first run.
+</details>
 
-### Prerequisites
+## 🖼 Screenshots
 
-- [Rust](https://rustup.rs/) >= 1.75
-- [Node.js](https://nodejs.org/) >= 20
+<table>
+<tr>
+<td width="50%"><a href="docs/screenshots/01-dashboard.png"><img src="docs/screenshots/01-dashboard.png" alt="Dashboard" /></a><br><b>Dashboard</b>: one-row start/stop for Nginx/Apache/MySQL/Redis, PHP multi-version, recent activity log</td>
+<td width="50%"><a href="docs/screenshots/03-vhosts-modal-basic.png"><img src="docs/screenshots/03-vhosts-modal-basic.png" alt="New site" /></a><br><b>New site</b>: Basic / Rewrite / SSL tabs; one-click template install; auto-signed HTTPS</td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/screenshots/08-config-nginx.png"><img src="docs/screenshots/08-config-nginx.png" alt="Service config" /></a><br><b>Service config</b>: 19 Nginx / 25 MySQL / 20 Redis / 34 PHP options, all visual</td>
+<td width="50%"><a href="docs/screenshots/06-store.png"><img src="docs/screenshots/06-store.png" alt="Store" /></a><br><b>Software store</b>: multi-version PHP/Nginx/MySQL download with multi-mirror acceleration</td>
+</tr>
+</table>
 
-### Dev mode
+> Full 13 screenshots in [docs/screenshots/](docs/screenshots/)
+
+## ✨ Highlights
+
+- 🚀 **Service management** — one-click start/stop; Nginx/Apache mutex; auto-launch PHP-CGI; port probing + process verification, no false positives
+- 🌐 **Virtual hosts** — dual-write to both Nginx + Apache configs; auto `hosts` file; one-click mkcert HTTPS (green lock directly in the browser)
+- 📦 **Site templates** — pick WordPress / Laravel / ThinkPHP / Webman / Blank when creating a vhost, auto-downloads or runs `composer create-project`
+- 🐘 **Multi-version PHP** — per-site PHP version; one-click switch global CLI `php`; same for Composer / Node / MySQL
+- ⚙️ **Visual config** — hundreds of Nginx/MySQL/Redis/PHP options visually editable, auto `.bak` before write
+- 📋 **Activity log** — every write op archived; keyword search, category filter, error rows highlighted, full stdout reviewable after modal close
+- 🏪 **Software store** — PHP official source + GitHub mirror, on-demand historical version download, SHA-256 verified
+- 🔍 **Port diagnosis** — auto-identify external processes occupying 80/3306/6379 (incl. PHPStudy services), kill with one click
+
+<details>
+<summary>More details</summary>
+
+- **mkcert SSL**: auto-create local CA and install to current user cert store (no admin needed), browser trusts directly
+- **PHP extensions**: powered by [PIE](https://github.com/php/pie), one-click install/uninstall; auto-picks PHP 8.1+ as runtime
+- **Numeric validation**: pre-save range checks (e.g. `gzip_level` 1-9), avoiding `nginx reload` emerg errors
+- **Webman template**: auto-configures `proxy_pass http://127.0.0.1:8787`, reminds you to start the cli via `windows.bat`
+- **Tauri auto-updater**: built-in update check, signed update flow, seamless upgrade
+- **Modern UX**: light/dark theme toggle, compact UI, no native title bar, tray minimize
+
+</details>
+
+## 🤝 Compatibility
+
+| Scenario | Notes |
+|---|---|
+| **PHPStudy Pro** | Auto-scans its `Extensions` directory for PHP/Nginx/Apache/MySQL/Redis; vhost config format is identical to PHPStudy's, allowing two-way migration |
+| **Official PHP packages** | Directly recognizes zip archives extracted from windows.php.net |
+| **Config files** | Every write op creates a `.bak` backup first |
+| **Portable** | All data lives in `%USERPROFILE%\.naxone\` — copy this single folder to migrate machines |
+
+## 🛠 Build from source
+
+Requires [Rust](https://rustup.rs/) >= 1.75 and [Node.js](https://nodejs.org/) >= 20.
 
 ```bash
 # Install frontend deps
-cd crates/naxone-tauri/frontend
-npm install
+cd crates/naxone-tauri/frontend && npm install && cd ..
 
-# Run (Vite + Rust compile + Tauri window all in one)
-cd ..
+# Dev mode (Vite + Rust + Tauri all in one)
 cargo tauri dev
-```
 
-### Package
-
-```bash
+# Build NSIS installer (output at target/release/bundle/nsis/)
 cargo tauri build
-# Installer at target/release/bundle/nsis/
-```
 
-### Tests
-
-```bash
+# Tests
 cargo test --workspace
 ```
 
-## Architecture
+## 🏗 Architecture
 
-**Hexagonal architecture** (Ports & Adapters) — core business logic is fully decoupled from external dependencies.
+**Hexagonal architecture** (Ports & Adapters) — core business logic is fully decoupled from external deps:
+
+- **`naxone-core`** — pure domain logic, zero external deps, fully unit-testable
+- **`naxone-adapters`** — implements the port traits (process management, file IO, template rendering, platform API), future cross-platform expansion just replaces this layer
+- **`naxone-tauri`** — desktop app shell (Tauri IPC + Vue frontend + app init)
 
 ![Architecture](docs/diagrams/architecture.png)
 
-- **`naxone-core`**: Pure domain logic, zero external deps, fully unit-testable.
-- **`naxone-adapters`**: Implements the port traits defined in core, swappable (a future Linux TUI just replaces this layer).
-- **`naxone-tauri`**: Only IPC forwarding and app initialization.
-
-### Service start flow (with mutex + cascade)
-
-![Service flow](docs/diagrams/service-flow.png)
-
-### Vhost dual-write flow (Nginx + Apache in sync)
-
-![Vhost flow](docs/diagrams/vhost-flow.png)
-
-## Project layout
+<details>
+<summary>Full project layout</summary>
 
 ```
 naxone/
-├── Cargo.toml                          # Workspace root (unified version, shared deps)
+├── Cargo.toml                          # Workspace root
 ├── LICENSE                             # MIT
-├── logo.png / logo_transparent.png     # Brand assets
 ├── crates/
-│   ├── naxone-core/                    # Pure domain logic, zero external deps
+│   ├── naxone-core/                    # Pure domain logic
 │   │   └── src/
 │   │       ├── domain/                 # Domain models: Service / VirtualHost / PHP / Log
 │   │       ├── ports/                  # Port traits: ProcessManager / ConfigIO / TemplateEngine / PlatformOps
 │   │       ├── use_cases/              # Use cases: ServiceManager / VhostManager / PhpManager / ConfigEditor
-│   │       ├── config.rs               # AppConfig (TOML config deserialization)
+│   │       ├── config.rs               # AppConfig
 │   │       └── error.rs                # Unified error type
 │   │
 │   ├── naxone-adapters/                # Concrete implementations of the ports
 │   │   └── src/
-│   │       ├── config/                 # FsConfigIO (file IO)
-│   │       ├── package/                # Package scanner + store (PHP official / GitHub mirror)
-│   │       ├── platform/               # WindowsPlatform / LinuxPlatform (hosts, self-signed SSL, global PHP shim)
-│   │       ├── process/                # NativeProcessManager (process start/stop + port probing)
-│   │       ├── template/               # SimpleTemplateEngine (generates nginx/apache vhost configs)
-│   │       └── vhost/                  # VhostScanner (parses existing virtual hosts)
+│   │       ├── config/                 # FsConfigIO
+│   │       ├── package/                # Package scanner + store
+│   │       ├── platform/               # WindowsPlatform (hosts, self-signed SSL, global PHP shim)
+│   │       ├── process/                # NativeProcessManager
+│   │       ├── template/               # SimpleTemplateEngine
+│   │       └── vhost/                  # VhostScanner
 │   │
 │   └── naxone-tauri/                   # Desktop app shell
-│       ├── src/
-│       │   ├── main.rs                 # Tauri entry (system tray, plugin registration)
-│       │   ├── state.rs                # AppState (DI, config loading, legacy user migration)
-│       │   └── commands/               # Tauri IPC commands: service / vhost / php / settings / package / updater ...
-│       ├── frontend/                   # Vue 3 + Vite + Tailwind frontend
-│       │   └── src/
-│       │       ├── App.vue             # Root layout (custom title bar, sidebar, routing)
-│       │       ├── views/              # Pages: Dashboard / Vhosts / ServiceConfig / Settings
-│       │       ├── components/         # Reusable components: StoreCard / LogDrawer / SelectMenu ...
-│       │       └── assets/             # global.css (Tailwind + theme variables)
-│       ├── tauri.conf.json             # Tauri config
-│       ├── nsis/installer-hooks.nsh    # Windows installer customization (defaults to D:\NaxOne)
-│       ├── icons/                      # App icons (auto-generated from logo.png)
-│       └── capabilities/               # Tauri permission config
+│       ├── src/                        # Tauri entry + IPC commands
+│       ├── frontend/                   # Vue 3 + Vite + Tailwind
+│       │   └── src/views/              # Dashboard / Vhosts / ServiceConfig / GlobalEnv / Settings
+│       ├── tauri.conf.json
+│       ├── nsis/installer-hooks.nsh    # NSIS installer customization (defaults to D:\NaxOne)
+│       └── icons/                      # App icons
 ```
 
-## Compatibility
+</details>
 
-- **PHPStudy Pro**: Auto-scans its `Extensions` directory for PHP/Nginx/Apache/MySQL/Redis packages; the vhost config format generated is identical to PHPStudy's, allowing two-way migration.
-- **Official PHP packages**: Directly recognizes zip archives extracted from windows.php.net.
-- **Config files**: Every write operation creates a `.bak` backup first.
-- **Portable**: All data lives in `%USERPROFILE%\.naxone\` (vhost list, CA certs, activity log) — copy that single folder to migrate.
+<details>
+<summary>Service start / vhost dual-write flow diagrams</summary>
 
-## License
+### Service start flow (with mutex + cascade)
+![Service flow](docs/diagrams/service-flow.png)
+
+### Vhost dual-write flow (Nginx + Apache in sync)
+![Vhost flow](docs/diagrams/vhost-flow.png)
+
+</details>
+
+## 📜 License
 
 [MIT](LICENSE) © 2026 NaxOne Contributors
 
-The managed binaries (PHP / Nginx / Apache / MySQL / Redis) follow their respective original licenses (PHP License / BSD / Apache 2.0 / GPL / BSD). NaxOne only acts as a local launcher and config tool — it does **not** redistribute these binaries.
+The managed binaries (PHP / Nginx / Apache / MySQL / Redis) follow their respective original licenses (PHP License / BSD / Apache 2.0 / GPL / BSD). NaxOne is purely a local launcher and configuration tool — it does **not** redistribute these binaries.
