@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { X, Trash2, FolderOpen, RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, Copy } from "lucide-vue-next";
+import { X, Trash2, FolderOpen, RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Info, Bug, Copy, Search } from "lucide-vue-next";
 import { toast } from "../composables/useToast";
 import SelectMenu from "./SelectMenu.vue";
 
@@ -21,7 +21,18 @@ const emit = defineEmits<{ (e: "close"): void }>();
 const logs = ref<LogEntry[]>([]);
 const levelFilter = ref<string>("");
 const categoryFilter = ref<string>("");
+const searchKeyword = ref<string>("");
 const expandedIds = ref<Set<number>>(new Set());
+
+/// 关键字搜索：匹配 message 或 details（大小写不敏感）。后端 filter 已经处理 level/category，这里只做前端关键字过滤。
+const filteredLogs = computed(() => {
+  const kw = searchKeyword.value.trim().toLowerCase();
+  if (!kw) return logs.value;
+  return logs.value.filter((l) =>
+    l.message.toLowerCase().includes(kw) ||
+    (l.details?.toLowerCase().includes(kw) ?? false),
+  );
+});
 
 const levelOptions = [
   { label: "全部级别", value: "" },
@@ -35,9 +46,14 @@ const categoryOptions = [
   { label: "全部分类", value: "" },
   { label: "服务", value: "service" },
   { label: "站点", value: "vhost" },
-  { label: "配置", value: "config" },
+  { label: "模板", value: "site-template" },
   { label: "扩展", value: "extension" },
+  { label: "商店", value: "store" },
+  { label: "配置", value: "config" },
+  { label: "工具", value: "tool" },
+  { label: "端口", value: "port" },
   { label: "设置", value: "settings" },
+  { label: "用户", value: "user" },
   { label: "系统", value: "system" },
 ];
 
@@ -137,7 +153,11 @@ function levelColor(level: string): string {
 }
 
 function categoryLabel(cat: string): string {
-  return ({ service: "服务", vhost: "站点", config: "配置", extension: "扩展", settings: "设置", system: "系统" } as Record<string, string>)[cat] || cat;
+  return ({
+    service: "服务", vhost: "站点", "site-template": "模板",
+    extension: "扩展", store: "商店", config: "配置", tool: "工具",
+    port: "端口", settings: "设置", user: "用户", system: "系统",
+  } as Record<string, string>)[cat] || cat;
 }
 
 watch([levelFilter, categoryFilter], () => {
@@ -175,25 +195,43 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
         <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--border-color)">
           <div class="flex items-center gap-2">
             <span class="text-[16px] font-semibold">活动日志</span>
-            <span class="text-[13px]" style="color: var(--text-muted)">{{ logs.length }} 条</span>
+            <span class="text-[13px]" style="color: var(--text-muted)">
+              <template v-if="searchKeyword && filteredLogs.length !== logs.length">{{ filteredLogs.length }} / {{ logs.length }} 条</template>
+              <template v-else>{{ logs.length }} 条</template>
+            </span>
           </div>
           <button class="p-1 rounded hover:bg-[var(--bg-hover)] transition-colors" @click="emit('close')">
             <X :size="16" />
           </button>
         </div>
 
-        <div class="flex items-center gap-2 px-4 py-2 border-b" style="border-color: var(--border-color)">
-          <SelectMenu v-model="levelFilter" :options="levelOptions" trigger-class="input" />
-          <SelectMenu v-model="categoryFilter" :options="categoryOptions" trigger-class="input" />
-          <button class="btn btn-secondary btn-sm !px-2" @click="loadLogs(true)" title="刷新"><RefreshCw :size="13" /></button>
-          <button class="btn btn-secondary btn-sm !px-2" @click="openLogDir" title="打开日志目录"><FolderOpen :size="13" /></button>
-          <button class="btn btn-secondary btn-sm !px-2" @click="clearLogs" title="清空"><Trash2 :size="13" /></button>
+        <div class="flex flex-col gap-2 px-4 py-2 border-b" style="border-color: var(--border-color)">
+          <div class="flex items-center gap-2">
+            <SelectMenu v-model="levelFilter" :options="levelOptions" trigger-class="input" />
+            <SelectMenu v-model="categoryFilter" :options="categoryOptions" trigger-class="input" />
+            <button class="btn btn-secondary btn-sm !px-2" @click="loadLogs(true)" title="刷新"><RefreshCw :size="13" /></button>
+            <button class="btn btn-secondary btn-sm !px-2" @click="openLogDir" title="打开日志目录"><FolderOpen :size="13" /></button>
+            <button class="btn btn-secondary btn-sm !px-2" @click="clearLogs" title="清空"><Trash2 :size="13" /></button>
+          </div>
+          <div class="relative">
+            <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color: var(--text-muted)" />
+            <input v-model="searchKeyword" class="input w-full" style="padding-left: 28px; font-size: 13px"
+                   placeholder="搜索消息或 details 内容…" />
+            <button v-if="searchKeyword" class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-[var(--bg-hover)]"
+                    style="color: var(--text-muted); background: transparent; border: none; cursor: pointer"
+                    @click="searchKeyword = ''" title="清除">
+              <X :size="12" />
+            </button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto">
-          <div v-if="logs.length === 0" class="text-center py-12 text-[16px]" style="color: var(--text-muted)">暂无日志</div>
-          <div v-for="log in logs" :key="log.id"
-               class="px-4 py-2 border-b cursor-pointer transition-colors hover:bg-[var(--bg-hover)] group"
+          <div v-if="filteredLogs.length === 0" class="text-center py-12 text-[16px]" style="color: var(--text-muted)">
+            {{ searchKeyword ? `无匹配 "${searchKeyword}" 的日志` : '暂无日志' }}
+          </div>
+          <div v-for="log in filteredLogs" :key="log.id"
+               class="px-4 py-2 border-b cursor-pointer transition-colors hover:bg-[var(--bg-hover)] group log-row"
+               :class="{ 'log-row-error': log.level === 'error', 'log-row-warn': log.level === 'warn' }"
                :style="{ borderColor: 'var(--border-color)' }"
                @click="toggleExpand(log.id)">
             <div class="flex items-start gap-2.5">
@@ -228,4 +266,10 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 .drawer-enter-active .absolute.top-0, .drawer-leave-active .absolute.top-0 { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 .drawer-enter-from, .drawer-leave-to { opacity: 0; }
 .drawer-enter-from .absolute.top-0, .drawer-leave-to .absolute.top-0 { transform: translateX(100%); }
+
+/* 失败 / 警告条目视觉高亮：左侧色条 + 微染色 */
+.log-row-error { border-left: 3px solid var(--color-danger); background: rgba(239, 68, 68, 0.05); }
+.log-row-error:hover { background: rgba(239, 68, 68, 0.10); }
+.log-row-warn { border-left: 3px solid #eab308; background: rgba(234, 179, 8, 0.04); }
+.log-row-warn:hover { background: rgba(234, 179, 8, 0.08); }
 </style>
