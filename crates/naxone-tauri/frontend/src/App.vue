@@ -24,7 +24,7 @@ function applyTheme(mode: string) {
 }
 
 onMounted(async () => {
-  const saved = localStorage.getItem("naxone-theme") || "dark";
+  const saved = localStorage.getItem("naxone-theme") || "light";
   applyTheme(saved);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (localStorage.getItem("naxone-theme") === "auto") applyTheme("auto");

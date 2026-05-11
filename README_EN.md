@@ -23,29 +23,32 @@
 
 NaxOne is a Windows local development environment manager built for PHP developers. A single native desktop app puts Nginx, Apache, MySQL, Redis, and multiple PHP versions in one panel — start/stop, configuration, virtual hosts, and SSL all handled in one place.
 
-Stack: **Rust + Tauri 2 + Vue 3 + TypeScript**. Cold start < 1s, resident memory < 100MB, installer just 4MB.
+Stack: **Rust + Tauri 2 + Vue 3 + TypeScript**. Cold start < 1s, resident memory < 100MB, installer around 6MB.
 
 > **How does it relate to PHPStudy?** NaxOne **does not depend on PHPStudy** — it can be installed and run standalone. But if PHPStudy is **already on your machine**, NaxOne automatically detects its install directory and PHP/Nginx/MySQL packages, bringing them under management without reinstalling and without breaking existing sites. The two coexist peacefully.
 
 ## Highlights
 
 - **Service management**: One-click start/stop for Nginx / Apache / MySQL / Redis / PHP-CGI; Nginx and Apache are auto-mutually-exclusive; starting a web server auto-launches PHP-CGI; port probing + process name verification means no false positives.
-- **Virtual hosts**: Create / edit / delete sites; **dual-write** to both Nginx and Apache configs (zero cost to switch engines); auto-update `hosts` file; instant reload on save; rewrite presets (Laravel / ThinkPHP / WordPress); one-click self-signed SSL.
-- **Multiple PHP versions**: Install many PHP versions locally, each site picks its own; one-click switch the global CLI `php` command (a shim is mounted on user PATH, takes effect in any new terminal).
-- **Service configuration**: Visual editor for 19 Nginx / 25 MySQL / 20 Redis / 34 PHP options; PHP extension toggles; `.bak` backup before every change.
-- **Software store**: Built-in PHP official source + GitHub mirror, on-demand download of historical versions, multi-mirror acceleration.
-- **Stranger process detection**: Dashboard automatically identifies external processes occupying ports 80/3306/6379 (including PHPStudy services) — kill with one click.
-- **Modern experience**: Compact dark UI with glassmorphism, no native title bar, system tray minimization, auto update check, memory monitoring.
+- **Virtual hosts**: Create / edit / delete sites; **dual-write** to both Nginx and Apache configs (zero cost to switch engines); auto-update `hosts` file; instant reload on save; rewrite presets (Laravel / ThinkPHP / WordPress / Webman); one-click mkcert HTTPS (auto-create local CA + sign leaf cert — browser shows the green lock directly).
+- **One-click site templates**: When creating a vhost, choose **Blank / WordPress / Laravel / ThinkPHP / Webman** — NaxOne downloads or runs `composer create-project` for you; framework projects auto-point to the `public/` entry subdirectory + matching rewrite preset + (Webman) proxy_pass.
+- **Multiple PHP versions**: Install many PHP versions locally, each site picks its own; one-click switch the global CLI `php` command (a shim is mounted on user PATH, takes effect in any new terminal). Composer / Node / MySQL version switching too.
+- **Service configuration**: Visual editor for 19 Nginx / 25 MySQL / 20 Redis / 34 PHP options; PHP extension toggles; `.bak` backup before every change; pre-save numeric range validation to avoid `nginx reload` emerg errors.
+- **Activity log**: Every write operation (start/stop / vhost CRUD / template install / extension install / version switch / kill process) is archived in the activity log panel — **keyword search, category filter, error rows highlighted**. Streaming logs (composer, WordPress download) keep the full stdout/stderr as `details` on the log entry, so you can review them after the modal closes.
+- **Software store**: Built-in PHP official source + GitHub mirror, on-demand download of historical versions, multi-mirror acceleration, SHA-256 verified.
+- **PHP extensions**: One-click install/uninstall via [PIE](https://github.com/php/pie); auto-picks PHP 8.1+ as runtime; streaming install log.
+- **Stranger process detection**: Dashboard automatically identifies external processes occupying ports 80/3306/6379 (including PHPStudy services) — kill with one click; service start failure due to port conflict auto-opens a diagnosis dialog.
+- **Modern experience**: Compact UI with glassmorphism, light/dark theme toggle, no native title bar, system tray minimization, Tauri auto-update.
 
 ## Screenshots
 
 ### Dashboard
-Glassmorphism + ambient orbs. One-click start/stop for Nginx/Apache/MySQL/Redis, multi-version PHP managed in one row.
+Glassmorphism + ambient orbs. One-click start/stop for Nginx/Apache/MySQL/Redis, multi-version PHP managed in one row, recent activity log at the bottom.
 
 ![Dashboard](docs/screenshots/01-dashboard.png)
 
 ### New Site
-Three tabs: Basic config / Rewrite preset / SSL & advanced, auto-syncs hosts file.
+Three tabs: Basic config / Rewrite preset / SSL & advanced. Pick a WordPress / Laravel / ThinkPHP / Webman template for one-click scaffold, auto-sync hosts file, one-click HTTPS cert.
 
 ![New site](docs/screenshots/03-vhosts-modal-basic.png)
 
@@ -80,7 +83,7 @@ Download the latest installer:
 | China (recommended) | [Gitee Releases](https://gitee.com/kz_y/naxone/releases/latest) |
 | Worldwide | [GitHub Releases](https://github.com/OverfireWater/naxone/releases/latest) |
 
-File name `NaxOne_X.Y.Z_x64-setup.exe`, around 4 MB. NSIS installer, **defaults to `D:\NaxOne`** (falls back to `C:\NaxOne` if D: doesn't exist).
+File name `NaxOne_X.Y.Z_x64-setup.exe`, around 6 MB. NSIS installer, **defaults to `D:\NaxOne`** (falls back to `C:\NaxOne` if D: doesn't exist).
 
 Requires Windows 10 1809+ / Windows 11, x64.
 
@@ -194,6 +197,7 @@ naxone/
 - **PHPStudy Pro**: Auto-scans its `Extensions` directory for PHP/Nginx/Apache/MySQL/Redis packages; the vhost config format generated is identical to PHPStudy's, allowing two-way migration.
 - **Official PHP packages**: Directly recognizes zip archives extracted from windows.php.net.
 - **Config files**: Every write operation creates a `.bak` backup first.
+- **Portable**: All data lives in `%USERPROFILE%\.naxone\` (vhost list, CA certs, activity log) — copy that single folder to migrate.
 
 ## License
 

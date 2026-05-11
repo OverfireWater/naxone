@@ -23,29 +23,32 @@
 
 NaxOne 是面向 PHP 开发者的 Windows 本地开发集成环境管理器。一个原生桌面 App 把 Nginx / Apache / MySQL / Redis / 多版本 PHP 全部装进同一个面板，启停、配置、虚拟主机、SSL 一站搞定。
 
-技术栈：**Rust + Tauri 2 + Vue 3 + TypeScript**。冷启动 < 1s，内存常驻 < 100MB，安装包仅 4MB。
+技术栈：**Rust + Tauri 2 + Vue 3 + TypeScript**。冷启动 < 1s，内存常驻 < 100MB，安装包约 6MB。
 
 > **跟 PHPStudy 是什么关系？** NaxOne **不依赖 PHPStudy**，可以独立安装、独立运行。但如果你机器上**已经有 PHPStudy**，NaxOne 会自动识别它的安装目录、PHP/Nginx/MySQL 包，把它们也纳入管理——无需重装、不破坏现有站点。两者互不影响、平滑共存。
 
 ## 功能亮点
 
 - **服务管理**：一键启停 Nginx / Apache / MySQL / Redis / PHP-CGI；Nginx 与 Apache 自动互斥；启动 Web 服务器联动拉起 PHP-CGI；端口探测 + 进程名校验，状态绝不假阳性
-- **虚拟主机**：创建/编辑/删除站点；Nginx + Apache 配置**双写**（切引擎零成本）；自动写入 hosts；改完即时 reload；伪静态预设（Laravel/ThinkPHP/WordPress）；一键自签 SSL
-- **PHP 多版本**：本地装多个 PHP，每个站点选独立版本；全局 CLI `php` 命令一键切版本（在用户 PATH 下挂 shim，新开终端立即生效）
-- **服务配置**：Nginx 19 项 / MySQL 25 项 / Redis 20 项 / PHP 34 项可视化配置；PHP 扩展开关；改动前自动 `.bak`
-- **软件商店**：内置 PHP 官方源 + GitHub 镜像源，按需下载历史版本，多镜像加速
-- **陌生进程检测**：仪表板自动识别外部占用 80/3306/6379 等端口的进程（含 PHPStudy 自带服务），点一下即可结束
-- **现代体验**：紧凑暗色界面、无原生标题栏、系统托盘最小化、自动更新检查、内存监控
+- **虚拟主机**：创建 / 编辑 / 删除；Nginx + Apache 配置**双写**（切引擎零成本）；自动写入 hosts；改完即时 reload；伪静态预设（Laravel / ThinkPHP / WordPress / Webman）；一键 mkcert HTTPS（自动建本地 CA + 签 leaf 证书，浏览器直接绿锁）
+- **站点模板一键装**：新建 vhost 时选 **空白 / WordPress / Laravel / ThinkPHP / Webman**，自动下载或 `composer create-project`；框架装完自动指到 `public/` 入口子目录 + 配套伪静态 + （Webman 的）proxy_pass
+- **PHP 多版本**：本地装多个 PHP，每个站点选独立版本；全局 CLI `php` 命令一键切版本（用户 PATH 挂 shim，新开终端立即生效）；Composer / Node / MySQL 同样支持切版本
+- **服务配置**：Nginx 19 项 / MySQL 25 项 / Redis 20 项 / PHP 34 项可视化配置；PHP 扩展开关；改动前自动 `.bak`；保存前数值字段范围校验，避免 nginx reload 报 emerg
+- **活动日志**：所有写操作（启停 / vhost CRUD / 模板装包 / 扩展安装 / 切版本 / kill 进程）都归档到活动日志面板，支持**关键字搜索 / 分类过滤 / 失败行高亮**；流式日志（composer / WordPress 下载）的完整 stdout/stderr 作为 details 存在条目里，关掉 modal 也能回查
+- **软件商店**：内置 PHP 官方源 + GitHub 镜像源，按需下载历史版本，多镜像加速，SHA-256 校验
+- **PHP 扩展**：基于 [PIE](https://github.com/php/pie) 一键装/卸；自动选 PHP 8.1+ 当 runtime；流式装包日志
+- **陌生进程检测**：仪表板自动识别外部占用 80/3306/6379 等端口的进程（含 PHPStudy 自带服务），点一下即可结束；启动服务遇端口冲突自动弹诊断对话框
+- **现代体验**：紧凑界面、亮色/暗色主题切换、无原生标题栏、系统托盘最小化、Tauri 自动更新
 
 ## 界面预览
 
 ### 仪表板
-毛玻璃 + 多色光晕，Nginx/Apache/MySQL/Redis 一行启停，PHP 多版本统一管理。
+毛玻璃 + 多色光晕，Nginx/Apache/MySQL/Redis 一行启停，PHP 多版本统一管理，底部活动日志快览。
 
 ![Dashboard](docs/screenshots/01-dashboard.png)
 
 ### 新建站点
-三 tab：基础配置 / 伪静态预设 / SSL 与高级，自动同步 hosts。
+三 tab：基础配置 / 伪静态预设 / SSL 与高级。可一键选择 WordPress / Laravel / ThinkPHP / Webman 模板自动装包，自动同步 hosts、自动签 HTTPS 证书。
 
 ![新建站点](docs/screenshots/03-vhosts-modal-basic.png)
 
@@ -80,7 +83,7 @@ PHPStudy 路径 / WWW 根目录 / 端口 / 自启动 / 主题。
 | 国内（推荐） | [Gitee Releases](https://gitee.com/kz_y/naxone/releases/latest) |
 | 海外 | [GitHub Releases](https://github.com/OverfireWater/naxone/releases/latest) |
 
-文件名 `NaxOne_X.Y.Z_x64-setup.exe`，约 4 MB。NSIS 打包，**默认装到 `D:\NaxOne`**（如果你 D 盘存在，否则 `C:\NaxOne`）。
+文件名 `NaxOne_X.Y.Z_x64-setup.exe`，约 6 MB。NSIS 打包，**默认装到 `D:\NaxOne`**（如果你 D 盘存在，否则 `C:\NaxOne`）。
 
 要求 Windows 10 1809+ / Windows 11，x64 架构。
 
@@ -194,6 +197,7 @@ naxone/
 - **PHPStudy Pro**：自动扫描其 `Extensions` 目录里的 PHP/Nginx/Apache/MySQL/Redis 包；生成的 vhost 配置格式与 PHPStudy 完全一致，可双向迁移
 - **PHP 官方包**：直接识别 windows.php.net 下载的 zip 解压目录
 - **配置文件**：所有写操作前自动 `.bak` 备份
+- **跨电脑**：所有数据落在 `%USERPROFILE%\.naxone\`（vhost 列表、CA 证书、活动日志），单文件夹拷贝可迁移
 
 ## 许可证
 

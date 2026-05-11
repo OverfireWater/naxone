@@ -2,42 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ===== Theme: Dark ===== */
+/* ===== Theme: Light（默认） ===== */
 :root,
-[data-theme="dark"] {
-  --bg-primary: #0a0e16;
-  --bg-secondary: rgba(255, 255, 255, 0.06);
-  --bg-tertiary: rgba(255, 255, 255, 0.04);
-  --bg-input: rgba(255, 255, 255, 0.05);
-  --bg-modal: rgba(18, 22, 32, 0.85);
-  --bg-overlay: rgba(0, 0, 0, 0.6);
-  --bg-drawer: rgba(18, 22, 32, 0.88);
-  --bg-titlebar: transparent;
-  --bg-glass-blur: blur(32px) saturate(180%);
-  --bg-hover: rgba(255, 255, 255, 0.06);
-  --bg-active: rgba(99, 128, 255, 0.18);
-  --border-color: rgba(255, 255, 255, 0.10);
-  --border-focus: #6380ff;
-  --text-primary: #e8ecf4;
-  --text-secondary: #94a3b8;
-  --text-muted: #8593aa;
-  --color-success: #22c55e;
-  --color-success-light: #4ade80;
-  --color-danger: #ef4444;
-  --color-danger-hover: #f87171;
-  --color-blue: #6380ff;
-  --color-blue-light: #818cf8;
-  --color-gray: rgba(148, 163, 184, 0.20);
-  --color-gray-light: rgba(148, 163, 184, 0.40);
-  --color-accent: #f59e0b;
-  --color-warn: #fbbf24;
-  --color-purple: #a855f7;
-  --color-cyan: #06b6d4;
-  --color-yellow: #eab308;
-  --shadow-card: 0 8px 32px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08);
-  --shadow-glow: 0 0 20px rgba(99,128,255,0.08);
-}
-
 [data-theme="light"] {
   --bg-primary: #f4f6fb;
   --bg-secondary: rgba(255, 255, 255, 0.55);
@@ -70,6 +36,40 @@
   --color-yellow: #ca8a04;
   --shadow-card: 0 8px 32px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
   --shadow-glow: 0 0 20px rgba(99,128,255,0.06);
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0a0e16;
+  --bg-secondary: rgba(255, 255, 255, 0.06);
+  --bg-tertiary: rgba(255, 255, 255, 0.04);
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-modal: rgba(18, 22, 32, 0.85);
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+  --bg-drawer: rgba(18, 22, 32, 0.88);
+  --bg-titlebar: transparent;
+  --bg-glass-blur: blur(32px) saturate(180%);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(99, 128, 255, 0.18);
+  --border-color: rgba(255, 255, 255, 0.10);
+  --border-focus: #6380ff;
+  --text-primary: #e8ecf4;
+  --text-secondary: #94a3b8;
+  --text-muted: #8593aa;
+  --color-success: #22c55e;
+  --color-success-light: #4ade80;
+  --color-danger: #ef4444;
+  --color-danger-hover: #f87171;
+  --color-blue: #6380ff;
+  --color-blue-light: #818cf8;
+  --color-gray: rgba(148, 163, 184, 0.20);
+  --color-gray-light: rgba(148, 163, 184, 0.40);
+  --color-accent: #f59e0b;
+  --color-warn: #fbbf24;
+  --color-purple: #a855f7;
+  --color-cyan: #06b6d4;
+  --color-yellow: #eab308;
+  --shadow-card: 0 8px 32px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.08);
+  --shadow-glow: 0 0 20px rgba(99,128,255,0.08);
 }
 
 :root {
