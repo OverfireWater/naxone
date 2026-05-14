@@ -80,7 +80,9 @@ pub async fn generate_self_signed_cert(
 }
 
 /// Best-effort：尝试给端口加 Windows 防火墙入站放行。
-/// 80 端口通常由 nginx/apache 首次运行时系统已自动提示过，不重复处理。
+/// 本地访问（loopback）不经防火墙，浏览器访问 http://host.test:port 无需此规则；
+/// 此规则仅在让局域网其他设备 / 手机访问时才需要。所以非管理员模式下失败也无所谓，
+/// 静默处理即可。
 async fn try_open_firewall(port: u16, state: &AppState) {
     if port == 80 {
         return;
@@ -91,27 +93,22 @@ async fn try_open_firewall(port: u16, state: &AppState) {
                 state,
                 LogLevel::Info,
                 "vhost",
-                format!("已放行防火墙端口 {}（NaxOne port {}）", port, port),
+                format!("已放行防火墙端口 {}", port),
                 Some("其他设备/手机可通过本机 IP 访问此端口".to_string()),
                 None,
             )
             .await;
         }
         Err(e) => {
-            push_log(
-                state,
-                LogLevel::Warn,
-                "vhost",
-                format!("防火墙端口 {} 未放行", port),
-                Some(format!("{}。可手动在 Windows 防火墙入站规则中为 TCP 端口 {} 放行。", e, port)),
-                None,
-            )
-            .await;
+            // 不弹 Warn —— 防火墙规则只影响外部访问，本地浏览器访问站点不受影响。
+            // 想让外部设备访问的用户自然会看不到端口通，那时再以管理员重启 NaxOne。
+            tracing::debug!("防火墙端口 {} 未放行（非管理员模式正常）: {}", port, e);
         }
     }
 }
 
 /// Best-effort：端口不再被任何 vhost 使用时关闭对应防火墙规则。
+/// 失败时静默处理（同 try_open_firewall）：留个废规则不构成安全风险，普通用户不必看到。
 async fn try_close_firewall(port: u16, remaining_vhosts: &[VirtualHost], state: &AppState) {
     if port == 80 {
         return;
@@ -121,15 +118,7 @@ async fn try_close_firewall(port: u16, remaining_vhosts: &[VirtualHost], state: 
         return;
     }
     if let Err(e) = state.platform_ops.remove_firewall_port(port) {
-        push_log(
-            state,
-            LogLevel::Warn,
-            "vhost",
-            format!("防火墙端口 {} 关闭失败", port),
-            Some(e.to_string()),
-            None,
-        )
-        .await;
+        tracing::debug!("防火墙端口 {} 关闭失败（非管理员模式正常）: {}", port, e);
     }
 }
 
@@ -238,12 +227,15 @@ fn all_infos(vhosts: &[VirtualHost]) -> Vec<VhostInfo> {
     vhosts.iter().map(to_info).collect()
 }
 
-/// Build a VirtualHost from a CreateVhostRequest, resolving PHP version to port and path
+/// Build a VirtualHost from a CreateVhostRequest, resolving PHP version to port and path.
+/// 选了 PHP 版本但在 services 找不到 → 返回 Err。否则会创建一个无 fastcgi 块的 vhost，
+/// 浏览器访问 .php 直接下载 raw 内容，用户排错很难。让用户先去解决 services 扫描的问题
+/// （如 phpstudy_path 配错、php 包卸载未重扫等）。
 fn build_vhost(
     req: &CreateVhostRequest,
     _state: &AppState,
     services: &[naxone_core::domain::service::ServiceInstance],
-) -> VirtualHost {
+) -> Result<VirtualHost, String> {
     let aliases: Vec<String> = req
         .aliases
         .split_whitespace()
@@ -268,10 +260,11 @@ fn build_vhost(
         match php_inst {
             Some(inst) => (Some(inst.port), Some(inst.install_path.clone())),
             None => {
-                // PHP version selected but not found in services - warn but don't fail
-                tracing::warn!("PHP version '{}' not found in installed services", php_ver);
-                (None, None)
-            },
+                return Err(format!(
+                    "选择的 PHP 版本 '{}' 不在已扫描服务中。\n常见原因：\n1. 「设置」里 PHPStudy 路径配错（拼写错误等）\n2. 该 PHP 已卸载但没重新扫描\n请到「设置」检查路径并重新扫描服务后重试。",
+                    php_ver
+                ));
+            }
         }
     } else {
         (None, None)
@@ -288,7 +281,7 @@ fn build_vhost(
         _ => None,
     };
 
-    VirtualHost {
+    Ok(VirtualHost {
         id,
         server_name: req.server_name.clone(),
         aliases,
@@ -308,12 +301,13 @@ fn build_vhost(
         expires_at: req.expires_at.clone(),
         sync_hosts: req.sync_hosts,
         source: VhostSource::Custom,
-    }
+    })
 }
 
 // --- Helper: resolve vhost dirs ---
 
 struct VhostDirs {
+    nginx_install: Option<PathBuf>,
     nginx_vhosts: Option<PathBuf>,
     apache_vhosts: Option<PathBuf>,
     apache_listen: Option<PathBuf>,
@@ -351,6 +345,7 @@ async fn resolve_dirs(state: &AppState) -> Result<VhostDirs, String> {
     }
 
     Ok(VhostDirs {
+        nginx_install: nginx_dir.clone(),
         nginx_vhosts: nginx_dir.map(|dir| dir.join("conf").join("vhosts")),
         apache_vhosts: apache_dir
             .as_ref()
@@ -358,6 +353,57 @@ async fn resolve_dirs(state: &AppState) -> Result<VhostDirs, String> {
         apache_listen: apache_dir
             .map(|dir| dir.join("conf").join("vhosts").join("Listen.conf")),
     })
+}
+
+/// 确保 `<install>/conf/nginx.conf` 含 `include vhosts/*.conf;`，并创建 vhosts 子目录。
+/// 商店装的官方 nginx 默认 conf 不含这行，NaxOne 写的 vhost 不会被加载。
+/// 幂等：检查到已 include 立即返回 Ok；写入前先 .bak 备份。
+pub fn ensure_nginx_vhosts_include(install: &std::path::Path) -> Result<(), String> {
+    let conf_dir = install.join("conf");
+    let vhosts_dir = conf_dir.join("vhosts");
+    if !vhosts_dir.exists() {
+        std::fs::create_dir_all(&vhosts_dir)
+            .map_err(|e| format!("创建 vhosts 目录失败: {}", e))?;
+    }
+
+    let nginx_conf = conf_dir.join("nginx.conf");
+    if !nginx_conf.is_file() {
+        // 没有 nginx.conf 不算这里的事（用户场景不应发生），交给上层报错
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&nginx_conf)
+        .map_err(|e| format!("读 nginx.conf 失败: {}", e))?;
+
+    // 任何形态的 "include vhosts/" 都视作已配置
+    if content.contains("include vhosts/") || content.contains("include  vhosts/") {
+        return Ok(());
+    }
+
+    // 找 "http {"，在它后面插入一行 include。简单字符串匹配能覆盖官方 conf
+    // 与 PHPStudy conf 的通用写法。
+    let marker = content.find("http {").or_else(|| content.find("http  {"));
+    let Some(http_pos) = marker else {
+        return Err("nginx.conf 中找不到 http 块，无法自动插入 include vhosts/*.conf;".into());
+    };
+    let insert_at = content[http_pos..]
+        .find('\n')
+        .map(|n| http_pos + n + 1)
+        .unwrap_or(content.len());
+
+    let mut new_content = String::with_capacity(content.len() + 32);
+    new_content.push_str(&content[..insert_at]);
+    new_content.push_str("    include vhosts/*.conf;\n");
+    new_content.push_str(&content[insert_at..]);
+
+    // .bak 备份
+    let bak = nginx_conf.with_extension("conf.bak");
+    let _ = std::fs::write(&bak, content.as_bytes());
+
+    std::fs::write(&nginx_conf, new_content.as_bytes())
+        .map_err(|e| format!("写 nginx.conf 失败: {}", e))?;
+
+    Ok(())
 }
 
 fn find_extension_dir(ext_path: &std::path::Path, prefix: &str) -> Option<PathBuf> {
@@ -461,7 +507,11 @@ pub async fn create_vhost(
 ) -> Result<Vec<VhostInfo>, String> {
     let dirs = resolve_dirs(&state).await?;
     let services = state.services.read().await;
-    let vhost = build_vhost(&req, &state, &services);
+    let vhost = build_vhost(&req, &state, &services).map_err(|e| {
+        let domain = format!("{}:{}", req.server_name, req.listen_port);
+        tracing::warn!("创建站点 {} 被拒绝: {}", domain, e);
+        e
+    })?;
 
     if let Err(e) = prevalidate_vhost(&vhost) {
         push_log(&state, LogLevel::Error, "vhost", format!("创建站点 {}:{} 被拒绝", vhost.server_name, vhost.listen_port), Some(e.clone()), None).await;
@@ -472,6 +522,15 @@ pub async fn create_vhost(
         let msg = format!("创建网站目录失败: {}", e);
         push_log(&state, LogLevel::Error, "vhost", format!("创建站点 {}:{} 失败", vhost.server_name, vhost.listen_port), Some(msg.clone()), None).await;
         return Err(msg);
+    }
+
+    // 兜底：确保 nginx.conf 含 include vhosts/*.conf;（商店包/官方包默认没有这行 → 浏览器看到 nginx 欢迎页）
+    if let Some(nginx_install) = dirs.nginx_install.as_ref() {
+        if let Err(e) = ensure_nginx_vhosts_include(nginx_install) {
+            push_log(&state, LogLevel::Warn, "vhost",
+                "nginx.conf 自动注入 include vhosts/*.conf 失败",
+                Some(e), None).await;
+        }
     }
 
     let running_ws = VhostManager::find_running_web_server(&services);
@@ -531,7 +590,10 @@ pub async fn update_vhost(
         .ok_or_else(|| format!("Vhost not found: {}", id))?;
 
     let old = vhosts[idx].clone();
-    let new_vhost = build_vhost(&req, &state, &services);
+    let new_vhost = build_vhost(&req, &state, &services).map_err(|e| {
+        tracing::warn!("更新站点 {}:{} 被拒绝: {}", req.server_name, req.listen_port, e);
+        e
+    })?;
     let running_ws = VhostManager::find_running_web_server(&services);
 
     let domain = new_vhost.server_name.clone();

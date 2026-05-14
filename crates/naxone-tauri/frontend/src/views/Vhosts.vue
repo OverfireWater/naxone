@@ -2,11 +2,15 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useRouter } from "vue-router";
 import { toast, friendlyError } from "../composables/useToast";
 import { onTextareaTab } from "../composables/useTextareaTab";
 import SelectMenu from "../components/SelectMenu.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
-import { Pencil, ExternalLink, FolderOpen, Trash2, FileText } from "lucide-vue-next";
+import { Pencil, ExternalLink, FolderOpen, Trash2, FileText, AlertCircle } from "lucide-vue-next";
+
+const router = useRouter();
 
 interface VhostInfo {
   id: string; server_name: string; aliases: string[]; listen_port: number;
@@ -66,6 +70,9 @@ const editingId = ref<string | null>(null);
 const editingSource = ref<string>("");
 const showTakeover = ref(false);
 const pendingDelete = ref<VhostInfo | null>(null);
+
+// null = 还在检测；false = 没有任何 nginx/apache；true = 至少装了一个
+const hasWebServer = ref<boolean | null>(null);
 
 // 站点模板初始化（仅新建时显示）
 const initTemplate = ref<string>("none");
@@ -167,6 +174,17 @@ function showFloat(msg: string, type: "success" | "error" = "success") {
   floatTimer = window.setTimeout(() => { floatMsg.value = ""; floatTimer = null; }, 2500);
 }
 async function loadVhosts() { try { vhosts.value = await invoke("get_vhosts"); } catch (e) { showError("加载失败: " + e); } }
+
+interface ServiceInfo { kind: string; }
+async function checkWebServer() {
+  try {
+    const services: ServiceInfo[] = await invoke("get_services");
+    hasWebServer.value = services.some(s => s.kind === "nginx" || s.kind === "apache");
+  } catch {
+    // 失败时保守按"有"处理，避免误导用户去装包
+    hasWebServer.value = true;
+  }
+}
 async function loadPhpVersions() { try { phpVersions.value = await invoke("get_php_versions"); } catch (e) { showError("加载PHP版本失败: " + e); } }
 async function loadWwwRoot() {
   try {
@@ -352,16 +370,28 @@ async function runTemplateInit(targetDir: string, template: string): Promise<boo
   const unlistenProgress = await listen<TemplateProgress>("site-template-progress", (e) => {
     templateProgress.value = e.payload;
   });
+  const labelMap: Record<string, string> = {
+    blank: "空白", wordpress: "WordPress", laravel: "Laravel",
+    thinkphp: "ThinkPHP", webman: "Webman",
+  };
+  const tplLabel = labelMap[template] || template;
   let success = false;
   try {
     await invoke("init_site_template", { targetDir, template });
     templateProgress.value = { phase: "done" };
     success = true;
+    // 用户关掉了 modal 去做别的事 → 通过 toast 告知完成
+    if (!showTemplateModal.value) {
+      toast.success(`${tplLabel} 模板已安装完成`);
+    }
   } catch (e) {
     const msg = String(e);
     templateLogs.value.push(`✗ ${msg}`);
     if (msg.includes("目录非空")) {
       showError(`模板初始化失败：${targetDir} 已有内容。请先清空该目录或换个新目录再创建。`);
+    } else if (!showTemplateModal.value) {
+      // modal 已关 → toast 兜底，让用户知道后台失败了
+      showError(`${tplLabel} 模板安装失败：${msg}`);
     } else {
       showError("模板初始化失败: " + msg);
     }
@@ -498,20 +528,48 @@ async function checkExpired() {
   try { vhosts.value = await invoke("check_expired_vhosts"); } catch {}
 }
 
-onMounted(() => {
+let unlistenServicesChanged: UnlistenFn | null = null;
+
+onMounted(async () => {
   loadVhosts(); loadPhpVersions(); loadWwwRoot();
+  checkWebServer();
   expiryTimer = window.setInterval(checkExpired, 60000); // Check every 60s
+  // 装包 / 切换 PHPStudy 路径后后端 emit services-changed
+  // → 自动刷新 web server 检测、PHP 版本下拉、vhost 列表（旧路径 PS vhost 会消失）
+  unlistenServicesChanged = await listen("services-changed", () => {
+    checkWebServer();
+    loadPhpVersions();
+    loadVhosts();
+  });
 });
-onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
+onUnmounted(() => {
+  if (expiryTimer) clearInterval(expiryTimer);
+  if (unlistenServicesChanged) unlistenServicesChanged();
+});
 </script>
 
 <template>
   <div class="max-w-[960px]">
+    <!-- 引导：未装任何 Web 服务器 → 点跳到软件商店 -->
+    <div v-if="hasWebServer === false" class="card mb-3 flex items-center gap-3"
+         style="border-left: 3px solid var(--color-warning); background: var(--bg-secondary)">
+      <AlertCircle :size="20" style="color: var(--color-warning); flex-shrink: 0" />
+      <div class="flex-1">
+        <div class="text-[14px] font-semibold mb-0.5">还没装 Web 服务器</div>
+        <div class="text-[12px]" style="color: var(--text-muted)">
+          创建网站需要 Nginx 或 Apache。点右侧按钮去「软件商店」一键安装。
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" @click="router.push('/store')">去软件商店</button>
+    </div>
+
     <!-- Header -->
     <div class="flex items-center justify-end mb-3">
       <div class="flex items-center gap-2">
         <input class="input" style="width: 200px" v-model="searchQuery" placeholder="搜索站点..." />
-        <button class="btn btn-success btn-sm" @click="openCreate" :disabled="busy">+ 新建站点</button>
+        <button class="btn btn-success btn-sm" @click="openCreate"
+                :disabled="busy || hasWebServer === false"
+                :title="hasWebServer === false ? '需要先安装 Nginx 或 Apache' : ''">+ 新建站点</button>
       </div>
     </div>
 
@@ -603,13 +661,13 @@ onUnmounted(() => { if (expiryTimer) clearInterval(expiryTimer); });
     </div>
 
     <!-- ==================== Site Template Init Progress ==================== -->
-    <div v-if="showTemplateModal" class="modal-overlay" @click.self="!templateBusy && (showTemplateModal = false)">
+    <div v-if="showTemplateModal" class="modal-overlay" @click.self="showTemplateModal = false">
       <div class="modal-content" style="width: 720px">
         <div class="flex items-center justify-between mb-2">
           <div class="text-base font-semibold">{{ templateBusy ? '正在初始化站点…' : '初始化完成' }}</div>
           <div class="flex gap-2">
             <button class="btn btn-secondary btn-sm" :disabled="!templateLogs.length" @click="copyTemplateLogs">复制日志</button>
-            <button class="btn btn-secondary btn-sm" :disabled="templateBusy" @click="showTemplateModal = false">{{ templateBusy ? '初始化中…' : '关闭' }}</button>
+            <button class="btn btn-secondary btn-sm" @click="showTemplateModal = false">{{ templateBusy ? '后台运行' : '关闭' }}</button>
           </div>
         </div>
         <!-- 状态条：阶段标签 + 进度条 + 已用时间 -->

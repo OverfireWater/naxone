@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::commands::logger::push_log;
 use crate::state::AppState;
@@ -104,7 +104,11 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigDto, String>
 }
 
 #[tauri::command]
-pub async fn save_config(dto: ConfigDto, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn save_config(
+    dto: ConfigDto,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let mut config = state.config.write().await;
 
     // 记录旧的 phpstudy_path，保存后若变化则自动 rescan，避免 services 缓存指向旧路径
@@ -144,17 +148,57 @@ pub async fn save_config(dto: ConfigDto, state: State<'_, AppState>) -> Result<(
     )
     .await;
 
-    // PHPStudy 路径变了 → 自动重扫一次 services + vhosts，让缓存跟上新路径。
-    // 否则 vhost 编辑/删除会因 resolve_dirs 找旧路径失败报错。
+    // PHPStudy 路径变了 → 先清掉 vhosts.json 里来源为 PhpStudy 的旧条目（指向旧路径已失效），
+    // 再 rescan 让新路径下的 vhost 被扫到。用户自建（source=Custom）的不动。
     if old_phpstudy != new_phpstudy {
-        let _ = rescan_services(state).await;
+        purge_phpstudy_sourced_vhosts(&state).await;
+        let _ = rescan_services(app, state).await;
     }
 
     Ok(())
 }
 
+/// 切换 phpstudy 路径时调用：从 vhosts.json 中删除 source=PhpStudy 的条目。
+/// Custom / Standalone 来源保留。
+async fn purge_phpstudy_sourced_vhosts(state: &State<'_, AppState>) {
+    use naxone_core::domain::vhost::VhostSource;
+    use naxone_core::use_cases::vhost_mgr::VhostManager;
+
+    let path = crate::state::vhosts_json_path();
+    let mut saved = VhostManager::load_vhosts_json(&path);
+    let before = saved.len();
+    saved.retain(|v| !matches!(v.source, VhostSource::PhpStudy));
+    if saved.len() == before {
+        return;
+    }
+    // 直接写 JSON，VhostManager 没暴露不依赖 self 的写方法
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(&saved) {
+        Ok(s) => {
+            let _ = std::fs::write(&path, s);
+        }
+        Err(e) => {
+            tracing::warn!("写 vhosts.json 失败: {}", e);
+        }
+    }
+    push_log(
+        state,
+        LogLevel::Info,
+        "settings",
+        format!("切换 PHPStudy 路径：清理 {} 条旧扫描 vhost 元数据", before - saved.len()),
+        None,
+        None,
+    )
+    .await;
+}
+
 #[tauri::command]
-pub async fn rescan_services(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn rescan_services(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     use naxone_adapters::config::fs_config::FsConfigIO;
     use naxone_adapters::package::composite::CompositeScanner;
     use naxone_adapters::vhost::VhostScanner;
@@ -222,7 +266,56 @@ pub async fn rescan_services(state: State<'_, AppState>) -> Result<(), String> {
         let mut vhosts = state.vhosts.write().await;
         *vhosts = merged;
     }
+
+    // nginx/apache 重装后会丢失 conf/vhosts/*.conf。从 vhosts.json 元数据自动重写
+    // 缺失的配置文件（不动用户已有的 .conf，幂等）。这样用户卸载 nginx → 重装 → 站点立即恢复。
+    regenerate_missing_vhost_configs(&state).await;
+
+    // 通知前端：services + vhosts 都已更新，让 Dashboard / Vhosts 立即刷新
+    let _ = app.emit("services-changed", ());
     Ok(())
+}
+
+/// 扫所有 web 服务器 install_dir，对 state.vhosts 里每个 vhost 检查 .conf 是否存在，
+/// 缺失则通过 VhostManager.regenerate_configs 重新写出来。
+async fn regenerate_missing_vhost_configs(state: &State<'_, AppState>) {
+    use naxone_core::domain::service::ServiceKind;
+
+    let services = state.services.read().await.clone();
+    let nginx_install = services.iter().find(|s| s.kind == ServiceKind::Nginx).map(|s| s.install_path.clone());
+    let apache_install = services.iter().find(|s| s.kind == ServiceKind::Apache).map(|s| s.install_path.clone());
+    drop(services);
+
+    let nginx_vhosts = nginx_install.as_ref().map(|d| d.join("conf").join("vhosts"));
+    let apache_vhosts = apache_install.as_ref().map(|d| d.join("conf").join("vhosts"));
+
+    if let Some(d) = &nginx_vhosts { let _ = std::fs::create_dir_all(d); }
+    if let Some(d) = &apache_vhosts { let _ = std::fs::create_dir_all(d); }
+
+    let vhosts = state.vhosts.read().await.clone();
+    let mut restored = 0usize;
+    for v in &vhosts {
+        match state.vhost_manager.regenerate_configs(
+            v,
+            nginx_vhosts.as_deref(),
+            apache_vhosts.as_deref(),
+        ) {
+            Ok(true) => restored += 1,
+            Ok(false) => {}
+            Err(e) => tracing::warn!("regenerate vhost {} 失败: {}", v.id, e),
+        }
+    }
+    if restored > 0 {
+        push_log(
+            state,
+            LogLevel::Success,
+            "vhost",
+            format!("从元数据恢复了 {} 个 vhost 配置文件", restored),
+            Some("nginx/apache 重装后 conf/vhosts/ 是空的，已根据 vhosts.json 自动重写。请到 Web 服务器手动 reload 或重启服务以加载新配置。".to_string()),
+            None,
+        )
+        .await;
+    }
 }
 
 // ==================== Extra install paths ====================
@@ -238,6 +331,7 @@ pub struct AddExtraPathRequest {
 #[tauri::command]
 pub async fn add_extra_install_path(
     req: AddExtraPathRequest,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<ExtraInstallPathDto>, String> {
     let kind = parse_kind(&req.kind)?;
@@ -290,7 +384,7 @@ pub async fn add_extra_install_path(
     .await;
 
     // Auto-rescan so the new service shows up immediately.
-    let _ = rescan_services(state).await;
+    let _ = rescan_services(app, state).await;
 
     Ok(result)
 }
@@ -298,6 +392,7 @@ pub async fn add_extra_install_path(
 #[tauri::command]
 pub async fn remove_extra_install_path(
     id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<ExtraInstallPathDto>, String> {
     let mut config = state.config.write().await;
@@ -326,7 +421,7 @@ pub async fn remove_extra_install_path(
     )
     .await;
 
-    let _ = rescan_services(state).await;
+    let _ = rescan_services(app, state).await;
     Ok(result)
 }
 

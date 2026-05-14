@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { AlertTriangle, Eye, EyeOff } from "lucide-vue-next";
 import SelectMenu from "../components/SelectMenu.vue";
 import { toast, friendlyError } from "../composables/useToast";
@@ -42,6 +42,19 @@ const devTools = ref<DevToolsInfo>({ composer: null, nvm: null, mysql: null });
 const nodePick = ref("");
 const composerPick = ref("");
 const mysqlPick = ref("");
+
+// Composer 镜像源选项：value 为空串 = 官方源；"custom" = 用户填 URL。
+const composerMirrors = [
+  { label: "Packagist 官方", value: "" },
+  { label: "阿里云", value: "https://mirrors.aliyun.com/composer/" },
+  { label: "腾讯云", value: "https://mirrors.cloud.tencent.com/composer/" },
+  { label: "华为云", value: "https://mirrors.huaweicloud.com/repository/php/" },
+  { label: "自定义 URL", value: "custom" },
+];
+const composerRepoUrl = ref("");        // 后端读到的当前 URL，空串 = 官方
+const composerMirrorPick = ref("");     // 下拉当前选中的 value
+const composerCustomUrl = ref("");      // pick=custom 时填入的 URL
+const composerRepoBusy = ref(false);
 const mysqlPwdInput = ref("");
 const mysqlCurrentPwd = ref("");
 const showMysqlPwd = ref(false);
@@ -126,6 +139,7 @@ async function applyGlobalPhp() {
       ? `全局 PHP 已切到 v${version}。请**新开** cmd 窗口跑 \`php -v\` 验证。`
       : `全局 PHP 已切到 v${version}`;
     toast.success(tip);
+    emit("global-env-changed");
   } catch (e) { showError(`设置失败: ${e}`); }
   finally { globalPhpBusy.value = false; }
 }
@@ -162,8 +176,56 @@ async function switchNode() {
     const result: NvmToolInfo = await invoke("switch_node_version", { version: nodePick.value });
     devTools.value = { ...devTools.value, nvm: result };
     toast.success(`Node.js 已切到 v${result.current_node ?? nodePick.value}。请新开 cmd 跑 \`node -v\` 验证。`);
+    emit("global-env-changed");
   } catch (e) { showError(`切换失败: ${e}`); }
   finally { nodeSwitchBusy.value = false; }
+}
+
+async function loadComposerRepo() {
+  // composer 没激活就不读，避免无谓报错
+  if (!devTools.value.composer?.active_version) return;
+  try {
+    const url: string = await invoke("get_composer_repo");
+    composerRepoUrl.value = url;
+    // 根据当前 URL 推断下拉选项
+    const matched = composerMirrors.find(m => m.value && m.value === url);
+    if (url === "") {
+      composerMirrorPick.value = "";
+    } else if (matched) {
+      composerMirrorPick.value = matched.value;
+    } else {
+      composerMirrorPick.value = "custom";
+      composerCustomUrl.value = url;
+    }
+  } catch (e) {
+    // 读不到（composer 没装 php 等）不抛 toast，保持空状态
+    console.warn("读 composer 镜像源失败:", e);
+  }
+}
+
+async function applyComposerMirror() {
+  if (composerRepoBusy.value) return;
+  const pick = composerMirrorPick.value;
+  let url = "";
+  if (pick === "custom") {
+    url = composerCustomUrl.value.trim();
+    if (!url) { showError("请填写自定义镜像 URL"); return; }
+    if (!/^https?:\/\//i.test(url)) { showError("URL 必须以 http:// 或 https:// 开头"); return; }
+  } else {
+    url = pick;  // 空串 = 官方
+  }
+  if (url === composerRepoUrl.value) return;
+
+  composerRepoBusy.value = true;
+  try {
+    const result: string = await invoke("set_composer_repo", { url });
+    composerRepoUrl.value = result;
+    toast.success(url === ""
+      ? "已重置为 Packagist 官方源"
+      : `Composer 镜像源已设为 ${url}`);
+    emit("global-env-changed");
+  } catch (e) { showError(`设置失败: ${e}`); }
+  finally { composerRepoBusy.value = false; }
 }
 
 async function switchComposer() {
@@ -173,6 +235,7 @@ async function switchComposer() {
     const result: DevToolsInfo = await invoke("set_global_composer", { version: composerPick.value });
     devTools.value = result;
     toast.success(`Composer 已切到 v${composerPick.value}。请新开 cmd 跑 \`composer -V\` 验证。`);
+    emit("global-env-changed");
   } catch (e) { showError(`切换失败: ${e}`); }
   finally { composerSwitchBusy.value = false; }
 }
@@ -184,6 +247,7 @@ async function switchMysql() {
     const result: DevToolsInfo = await invoke("set_global_mysql", { version: mysqlPick.value });
     devTools.value = result;
     toast.success(`MySQL 已切到 v${mysqlPick.value}。请新开 cmd 跑 \`mysql --version\` 验证。⚠ 不同 MySQL 实例的 root 密码可能不同，请到下方"MySQL 密码"重新查看/设置。`);
+    emit("global-env-changed");
   } catch (e) { showError(`切换失败: ${e}`); }
   finally { mysqlSwitchBusy.value = false; }
 }
@@ -249,10 +313,12 @@ onMounted(async () => {
   // 三个请求并发拉，全部回来再放下 loading 屏，避免逐个填充导致的"未发现 X"误导
   await Promise.all([loadServices(), loadGlobalPhp(), loadDevTools()]);
   loaded.value = true;
+  // composer 信息回来之后才能读镜像源，串到 loadDevTools 之后
+  loadComposerRepo();
   unlistenServicesChanged = await listen("services-changed", () => {
     loadServices();
     loadGlobalPhp();
-    loadDevTools();
+    loadDevTools().then(loadComposerRepo);
   });
 });
 
@@ -368,6 +434,35 @@ onUnmounted(() => {
               {{ devTools.composer.available[0]?.source === 'system' ? '系统' : '商店' }}
             </span>
           </template>
+        </div>
+
+        <!-- 镜像源切换 -->
+        <div v-if="devTools.composer.active_version" class="env-row">
+          <span class="env-label">镜像源</span>
+          <SelectMenu
+            v-model="composerMirrorPick"
+            :options="composerMirrors"
+            trigger-class="version-sel version-sel-btn"
+          />
+          <input
+            v-if="composerMirrorPick === 'custom'"
+            v-model="composerCustomUrl"
+            class="input ml-2 flex-1 min-w-0"
+            placeholder="https://your-mirror.example.com/composer/"
+          />
+          <button class="btn btn-primary btn-sm ml-auto"
+                  :disabled="composerRepoBusy
+                             || (composerMirrorPick !== 'custom' && composerMirrorPick === composerRepoUrl)
+                             || (composerMirrorPick === 'custom' && composerCustomUrl.trim() === composerRepoUrl)"
+                  @click="applyComposerMirror">
+            {{ composerRepoBusy ? '应用中...' : '应用' }}
+          </button>
+        </div>
+        <div v-if="devTools.composer.active_version" class="env-row" style="padding-top: 0">
+          <span class="env-label"></span>
+          <span class="env-value" style="font-size: 12px; color: var(--text-muted)">
+            当前：{{ composerRepoUrl || 'Packagist 官方' }}
+          </span>
         </div>
       </template>
     </div>

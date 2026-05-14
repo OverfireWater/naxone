@@ -190,17 +190,23 @@ public static class Env {{
         temp_quoted
     );
 
-    let output = std::process::Command::new("powershell")
-        .args([
+    let output = {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args([
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
             &launcher,
-        ])
-        .output()
-        .map_err(|e| format!("调用 PowerShell 失败: {}", e))?;
+        ]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        cmd.output().map_err(|e| format!("调用 PowerShell 失败: {}", e))?
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -58,6 +58,10 @@ pub struct GeneralConfig {
     /// 托盘“退出”时是否先停止全部服务。
     #[serde(default)]
     pub stop_services_on_exit: bool,
+    /// 用户通过「解除关联」操作隐藏的系统级工具名（"composer" / "nvm" 等）。
+    /// NaxOne 视野内当作没装，但用户原有的系统安装本身不会被改动。
+    #[serde(default)]
+    pub ignored_system_tools: Vec<String>,
 }
 
 fn default_auto_start() -> Vec<String> {
@@ -201,6 +205,7 @@ impl AppConfig {
                 package_install_root: None,
                 global_php_version: None,
                 stop_services_on_exit: false,
+                ignored_system_tools: Vec::new(),
             },
             web_server: WebServerConfig::default(),
             mysql: MysqlConfig::default(),

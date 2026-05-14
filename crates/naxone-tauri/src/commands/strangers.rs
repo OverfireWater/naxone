@@ -131,10 +131,16 @@ pub async fn kill_stranger(pid: u32, state: State<'_, AppState>) -> Result<(), S
         ));
     }
 
-    let out = std::process::Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
-        .output()
-        .map_err(|e| format!("调用 taskkill 失败: {}", e))?;
+    let out = {
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/F", "/PID", &pid.to_string()]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        cmd.output().map_err(|e| format!("调用 taskkill 失败: {}", e))?
+    };
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         let lower = stderr.to_lowercase();

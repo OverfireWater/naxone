@@ -2,9 +2,37 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { confirm } from "@tauri-apps/plugin-dialog";
 import { CheckCircle2, Download, AlertCircle, Trash2 } from "lucide-vue-next";
 import SelectMenu from "./SelectMenu.vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
+
+// 把 ConfirmDialog 包装成 await 风格，跟原 @tauri-apps/plugin-dialog 的 confirm 等价
+interface ConfirmReq {
+  title: string;
+  message: string;
+  confirmText: string;
+  variant: "default" | "danger";
+  resolve: (ok: boolean) => void;
+}
+const pendingConfirm = ref<ConfirmReq | null>(null);
+function confirm(
+  message: string,
+  opts: { title: string; kind?: "info" | "warning" | "error" },
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    pendingConfirm.value = {
+      title: opts.title,
+      message,
+      confirmText: opts.kind === "warning" || opts.kind === "error" ? "确认" : "确定",
+      variant: opts.kind === "warning" || opts.kind === "error" ? "danger" : "default",
+      resolve,
+    };
+  });
+}
+function resolveConfirm(ok: boolean) {
+  pendingConfirm.value?.resolve(ok);
+  pendingConfirm.value = null;
+}
 
 interface PackageVersion {
   version: string;
@@ -162,14 +190,28 @@ function handleEvent(ev: any) {
 
 const emit = defineEmits<{
   installed: [{ name: string; version: string }];
-  uninstalled: [{ name: string; version: string }];
+  uninstalled: [{ name: string; version: string; action: "uninstall" | "unlink" | "deep-uninstall" }];
 }>();
 
 /// store 来源：现状逻辑（删 NaxOne 装的目录 + 清环境）
 async function doUninstallStore() {
   if (uninstalling.value || !isSelectedInstalled.value) return;
+
+  // nginx / apache 卸载特别警告：vhost .conf 文件存放在 install_dir/conf/vhosts/ 下，
+  // 整目录删除 → 用户所有站点配置会丢。站点源码 + ~/.naxone/vhosts.json 元数据保留，
+  // 重装后会自动从元数据 regenerate，但还是要让用户明确知道这个流程。
+  let extraWarning = "";
+  if (props.pkg.name === "nginx" || props.pkg.name === "apache") {
+    try {
+      const vhosts = await invoke<Array<{ id: string }>>("get_vhosts");
+      if (vhosts.length > 0) {
+        extraWarning = `\n\n⚠ 当前有 ${vhosts.length} 个站点配置文件存在该目录下，卸载会一并删除。重装 ${props.pkg.display_name} 后 NaxOne 会从 vhosts.json 自动重建配置（你的站点源码、域名 hosts、SSL 证书都不会丢）。`;
+      }
+    } catch { /* 拿不到也不阻止卸载 */ }
+  }
+
   const ok = await confirm(
-    `确认卸载 ${props.pkg.display_name} v${selectedVersion.value}？\n\n将删除 NaxOne 安装的程序目录和相关环境配置（PATH 等）。该版本若有数据（如 MySQL data 目录）仅在卸载流程允许保留时不动。此操作不可撤销。`,
+    `确认卸载 ${props.pkg.display_name} v${selectedVersion.value}？\n\n将删除 NaxOne 安装的程序目录和相关环境配置（PATH 等）。该版本若有数据（如 MySQL data 目录）仅在卸载流程允许保留时不动。此操作不可撤销。${extraWarning}`,
     { title: "卸载软件", kind: "warning" }
   );
   if (!ok) return;
@@ -181,7 +223,7 @@ async function doUninstallStore() {
     phase.value = "idle";
     progress.value = 0;
     downloadedMB.value = null;
-    emit("uninstalled", { name: props.pkg.name, version: selectedVersion.value });
+    emit("uninstalled", { name: props.pkg.name, version: selectedVersion.value, action: "uninstall" });
   } catch (e) {
     phase.value = "failed";
     errorMsg.value = String(e);
@@ -205,7 +247,7 @@ async function doUnlinkSystem() {
     } else {
       phase.value = "idle";
     }
-    emit("uninstalled", { name: props.pkg.name, version: selectedVersion.value });
+    emit("uninstalled", { name: props.pkg.name, version: selectedVersion.value, action: "unlink" });
   } catch (e) {
     phase.value = "failed";
     errorMsg.value = String(e);
@@ -247,7 +289,7 @@ async function doDeepUninstallSystem() {
     } else {
       phase.value = "idle";
     }
-    emit("uninstalled", { name: props.pkg.name, version: selectedVersion.value });
+    emit("uninstalled", { name: props.pkg.name, version: selectedVersion.value, action: "deep-uninstall" });
   } catch (e) {
     phase.value = "failed";
     errorMsg.value = String(e);
@@ -429,6 +471,18 @@ watch(selectedVersion, () => {
       </div>
     </div>
   </div>
+
+  <!-- 自定义 confirm 对话框（取代 Tauri 原生 confirm，统一风格） -->
+  <ConfirmDialog
+    :open="!!pendingConfirm"
+    :title="pendingConfirm?.title || ''"
+    :confirm-text="pendingConfirm?.confirmText || '确认'"
+    :variant="pendingConfirm?.variant || 'default'"
+    @confirm="resolveConfirm(true)"
+    @cancel="resolveConfirm(false)"
+  >
+    <div style="white-space: pre-wrap">{{ pendingConfirm?.message || '' }}</div>
+  </ConfirmDialog>
 </template>
 
 <style scoped>

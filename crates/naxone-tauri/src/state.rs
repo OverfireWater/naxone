@@ -97,7 +97,8 @@ impl AppState {
         // （路径落在 cargo 的 target\debug 或 target\release 下，绝大多数情况都是
         // 上一次 cargo tauri dev 留下的，正式安装版应当指向自己同级的 www）
         let needs_migrate = config.general.www_root == legacy_default_www_root()
-            || is_cargo_target_path(&config.general.www_root);
+            || is_cargo_target_path(&config.general.www_root)
+            || is_legacy_ruststudy_path(&config.general.www_root);
         if needs_migrate {
             tracing::info!(
                 old = %config.general.www_root.display(),
@@ -296,6 +297,14 @@ pub fn resolve_log_dir(config: &AppConfig) -> PathBuf {
 fn is_cargo_target_path(path: &std::path::Path) -> bool {
     let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
     s.contains("\\target\\debug\\") || s.contains("\\target\\release\\")
+}
+
+/// 判断路径是否落在 RustStudy 时代的安装目录（如 `D:\RustStudy\www`）。
+/// 改名 NaxOne 后，老用户配置里的 www_root 应迁移到新 default。
+fn is_legacy_ruststudy_path(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    // 匹配路径段，避免误伤项目源码所在的 ...\utils\ruststudy\... 这种巧合
+    s.contains("\\ruststudy\\") || s.ends_with("\\ruststudy")
 }
 
 fn legacy_default_www_root() -> PathBuf {

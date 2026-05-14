@@ -3,12 +3,13 @@
 //! 默认包（PHP/Nginx/MySQL/Redis/Apache）解压即可用，不走这里。
 //! 走这里的是**工具类**包：
 //!
-//! - `composer`: 写 composer.bat 包裹 phar，挂用户 PATH，配阿里云源
+//! - `composer`: 写 composer.bat 包裹 phar（调 PATH 里的 php），挂用户 PATH。默认官方源，镜像由用户在
+//!               「全局环境」UI 自行选择
 //! - `nvm`:      写 settings.txt（含 npmmirror 镜像），设 NVM_HOME / NVM_SYMLINK，挂用户 PATH 两条
 //!
 //! 全部走 HKCU，不需要管理员。失败按 best-effort 记 warn，不阻塞主安装流程。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(target_os = "windows")]
 use crate::platform::user_env;
@@ -26,6 +27,7 @@ pub fn run(name: &str, install_dir: &Path) {
         "composer" => composer(install_dir),
         "nvm" => nvm(install_dir),
         "mysql" => mysql(install_dir),
+        "php" => php(install_dir),
         _ => {}
     }
 }
@@ -103,13 +105,10 @@ pub struct DeepUninstallReport {
 
 #[cfg(target_os = "windows")]
 fn composer(install_dir: &Path) {
-    // 1. composer.bat —— 调 NaxOne 全局 php.cmd shim，再传入 phar。
-    //    这样切换全局 PHP 后 composer 自动跟着切，不用重新装。
-    let php_shim = naxone_php_shim();
-    let bat = format!(
-        "@ECHO OFF\r\n\"{}\" \"%~dp0composer.phar\" %*\r\n",
-        php_shim.display()
-    );
+    // 1. composer.bat —— 调 PATH 里的 php，再传入 phar。
+    //    用户 PATH 中谁的 php 在前就用谁（NaxOne shim / PHPStudy / 系统 php 都行），
+    //    切换 PHP 不用动 composer.bat。默认官方 repo.packagist，镜像由用户自选。
+    let bat = "@ECHO OFF\r\nphp \"%~dp0composer.phar\" %*\r\n";
     if let Err(e) = std::fs::write(install_dir.join("composer.bat"), bat.as_bytes()) {
         tracing::warn!("写 composer.bat 失败: {}", e);
     }
@@ -120,31 +119,6 @@ fn composer(install_dir: &Path) {
         Ok(true) => tracing::info!("composer 加入用户 PATH: {}", install_str),
         Ok(false) => tracing::debug!("composer PATH 已存在: {}", install_str),
         Err(e) => tracing::warn!("写用户 PATH 失败: {}", e),
-    }
-
-    // 3. 配阿里云镜像源（best effort，PHP 没装/没设全局时会失败）
-    let bat_path = install_dir.join("composer.bat");
-    let result = std::process::Command::new(&bat_path)
-        .args([
-            "config",
-            "-g",
-            "repo.packagist",
-            "composer",
-            "https://mirrors.aliyun.com/composer/",
-        ])
-        .output();
-    match result {
-        Ok(o) if o.status.success() => {
-            tracing::info!("composer 镜像源已配置为阿里云");
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            tracing::warn!(
-                "composer config 配镜像失败（可能 PHP 全局 CLI 未设置）: {}",
-                stderr.trim()
-            );
-        }
-        Err(e) => tracing::warn!("composer config 调用失败: {}", e),
     }
 }
 
@@ -375,15 +349,98 @@ fn deep_uninstall_nvm(install_dir: &Path) -> DeepUninstallReport {
     r
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// PHP
+// ──────────────────────────────────────────────────────────────────────────
+
+/// 装 PHP 后保证 `<install>/php.ini` 存在且 `extension_dir = "ext"` 已启用。
+/// 商店里下载的官方 PHP 包只有 php.ini-production / -development，
+/// 且 extension_dir 全是注释，extension=openssl 等会找不到 dll。
 #[cfg(target_os = "windows")]
-fn naxone_php_shim() -> PathBuf {
-    crate::platform::global_php::bin_dir().join("php.cmd")
+fn php(install_dir: &Path) {
+    if let Err(e) = ensure_php_ini_extension_dir(install_dir) {
+        tracing::warn!("PHP post-install (修 php.ini) 失败: {}", e);
+    }
 }
 
-#[cfg(not(target_os = "windows"))]
-#[allow(dead_code)]
-fn naxone_php_shim() -> PathBuf {
-    PathBuf::new()
+/// 保证 `<install>/php.ini` 存在 + 含有非注释的 `extension_dir = "ext"` 行。
+/// 幂等：已经配置好的 PHP 不会被改动。返回 Ok(true) 表示有修改、Ok(false) 没修改。
+///
+/// 启动时遍历 services 的 PHP install_path 调用一次，把历史装的 PHP 也修好。
+pub fn ensure_php_ini_extension_dir(install_dir: &Path) -> Result<bool, String> {
+    let ini_path = install_dir.join("php.ini");
+
+    // 1. php.ini 不存在 → 拿 production / development 模板复制一份
+    if !ini_path.is_file() {
+        let template = ["php.ini-production", "php.ini-development"]
+            .iter()
+            .map(|n| install_dir.join(n))
+            .find(|p| p.is_file());
+        match template {
+            Some(src) => {
+                std::fs::copy(&src, &ini_path).map_err(|e| {
+                    format!("复制 {} → php.ini 失败: {}", src.display(), e)
+                })?;
+            }
+            None => {
+                // 没 php.ini 也没模板：不是标准 PHP 包，跳过
+                return Ok(false);
+            }
+        }
+    }
+
+    // 2. 读取 ini，检查是否已有生效的 extension_dir
+    let content = std::fs::read_to_string(&ini_path)
+        .map_err(|e| format!("读 php.ini 失败: {}", e))?;
+    let has_active = content.lines().any(|line| {
+        let t = line.trim_start();
+        !t.starts_with(';')
+            && !t.starts_with('#')
+            && t.split_once('=')
+                .map(|(k, _)| k.trim().eq_ignore_ascii_case("extension_dir"))
+                .unwrap_or(false)
+    });
+    if has_active {
+        return Ok(false);
+    }
+
+    // 3. 没生效的 extension_dir → 把第一处 `;extension_dir = "ext"` 解注释
+    let mut replaced = false;
+    let new_content: String = content
+        .lines()
+        .map(|line| {
+            if !replaced {
+                let t = line.trim_start();
+                if t.starts_with(';') {
+                    let stripped = t.trim_start_matches(';').trim_start();
+                    if let Some((k, v)) = stripped.split_once('=') {
+                        if k.trim().eq_ignore_ascii_case("extension_dir") && v.contains("\"ext\"") {
+                            replaced = true;
+                            return format!("extension_dir = \"ext\"");
+                        }
+                    }
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // 4. 模板里 `;extension_dir = "ext"` 没找到（异常情况） → 追加一行兜底
+    let final_content = if replaced {
+        new_content
+    } else {
+        let sep = if content.ends_with('\n') { "" } else { "\n" };
+        format!("{}{}extension_dir = \"ext\"\n", content, sep)
+    };
+
+    // 5. 备份原文件
+    let bak = ini_path.with_extension("ini.bak");
+    let _ = std::fs::write(&bak, content.as_bytes());
+    std::fs::write(&ini_path, final_content.as_bytes())
+        .map_err(|e| format!("写 php.ini 失败: {}", e))?;
+    tracing::info!(install = %install_dir.display(), "已启用 PHP extension_dir = ext");
+    Ok(true)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

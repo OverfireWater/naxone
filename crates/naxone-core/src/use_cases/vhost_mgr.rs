@@ -413,6 +413,36 @@ impl VhostManager {
         Ok(())
     }
 
+    /// 只重新生成 .conf 文件（nginx + apache），不写 hosts、不 reload。
+    /// 用于 nginx/apache 重装后从 vhosts.json 元数据恢复站点配置。
+    /// 已存在的 .conf 文件**不会**被覆盖（避免覆盖用户手动改过的）。
+    pub fn regenerate_configs(
+        &self,
+        vhost: &VirtualHost,
+        nginx_vhosts_dir: Option<&Path>,
+        apache_vhosts_dir: Option<&Path>,
+    ) -> Result<bool> {
+        let filename = vhost.config_filename();
+        let mut wrote = false;
+        if let Some(dir) = nginx_vhosts_dir {
+            let target = dir.join(&filename);
+            if !self.config_io.exists(&target) {
+                let conf = self.template_engine.render_nginx_vhost(vhost)?;
+                self.config_io.write_text(&target, &conf)?;
+                wrote = true;
+            }
+        }
+        if let Some(dir) = apache_vhosts_dir {
+            let target = dir.join(&filename);
+            if !self.config_io.exists(&target) {
+                let conf = self.template_engine.render_apache_vhost(vhost)?;
+                self.config_io.write_text(&target, &conf)?;
+                wrote = true;
+            }
+        }
+        Ok(wrote)
+    }
+
     /// Save vhost metadata to JSON file
     pub fn save_vhosts_json(&self, path: &Path, vhosts: &[VirtualHost]) -> Result<()> {
         if let Some(parent) = path.parent() {

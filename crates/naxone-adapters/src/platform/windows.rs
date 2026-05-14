@@ -65,17 +65,24 @@ fn write_hosts_elevated(path: &Path, content: &str, had_bom: bool) -> Result<()>
         script_path.display().to_string().replace('"', "``\"")
     );
 
-    let output = std::process::Command::new("powershell")
-        .args([
+    let output = {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args([
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
             &launcher,
-        ])
-        .output()
-        .map_err(|e| NaxOneError::Process(format!("调用提权 PowerShell 失败: {}", e)))?;
+        ]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        cmd.output()
+            .map_err(|e| NaxOneError::Process(format!("调用提权 PowerShell 失败: {}", e)))?
+    };
 
     let _ = std::fs::remove_file(&temp_path);
     let _ = std::fs::remove_file(&script_path);
@@ -179,8 +186,9 @@ fn firewall_rule_name(port: u16) -> String {
 
 /// `netsh advfirewall firewall add rule name=... dir=in action=allow protocol=TCP localport=...`
 fn netsh_add_rule(name: &str, port: u16) -> Result<()> {
-    let out = std::process::Command::new("netsh")
-        .args([
+    let out = {
+        let mut cmd = std::process::Command::new("netsh");
+        cmd.args([
             "advfirewall",
             "firewall",
             "add",
@@ -190,9 +198,15 @@ fn netsh_add_rule(name: &str, port: u16) -> Result<()> {
             "action=allow",
             "protocol=TCP",
             &format!("localport={}", port),
-        ])
-        .output()
-        .map_err(|e| NaxOneError::Process(format!("无法调用 netsh: {}", e)))?;
+        ]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        cmd.output()
+            .map_err(|e| NaxOneError::Process(format!("无法调用 netsh: {}", e)))?
+    };
     if out.status.success() {
         return Ok(());
     }
@@ -202,16 +216,23 @@ fn netsh_add_rule(name: &str, port: u16) -> Result<()> {
 /// `netsh advfirewall firewall delete rule name=...`
 /// 不存在对应规则时 netsh 也返回非零但文本里会有 "No rules match" —— 这种情况视为 Ok
 fn netsh_delete_rule(name: &str) -> Result<()> {
-    let out = std::process::Command::new("netsh")
-        .args([
+    let out = {
+        let mut cmd = std::process::Command::new("netsh");
+        cmd.args([
             "advfirewall",
             "firewall",
             "delete",
             "rule",
             &format!("name={}", name),
-        ])
-        .output()
-        .map_err(|e| NaxOneError::Process(format!("无法调用 netsh: {}", e)))?;
+        ]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        cmd.output()
+            .map_err(|e| NaxOneError::Process(format!("无法调用 netsh: {}", e)))?
+    };
     if out.status.success() {
         return Ok(());
     }

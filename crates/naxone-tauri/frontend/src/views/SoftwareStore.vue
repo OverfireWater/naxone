@@ -92,9 +92,14 @@ function onInstalled(payload: { name: string; version: string }) {
   toast.success(`${displayNameOf(payload.name)} v${payload.version} 已安装`);
 }
 
-function onUninstalled(payload: { name: string; version: string }) {
+function onUninstalled(payload: { name: string; version: string; action?: "uninstall" | "unlink" | "deep-uninstall" }) {
   loadInstalled();
-  toast.success(`${displayNameOf(payload.name)} v${payload.version} 已卸载`);
+  const name = displayNameOf(payload.name);
+  const ver = payload.version && payload.version !== "?" ? ` v${payload.version}` : "";
+  let suffix = "已卸载";
+  if (payload.action === "unlink") suffix = "已解除关联";
+  else if (payload.action === "deep-uninstall") suffix = "已彻底卸载";
+  toast.success(`${name}${ver} ${suffix}`);
 }
 
 onMounted(() => {

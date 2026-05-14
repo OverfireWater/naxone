@@ -110,6 +110,8 @@ fn main() {
             commands::tools::get_dev_tools_info,
             commands::tools::switch_node_version,
             commands::tools::set_global_composer,
+            commands::tools::get_composer_repo,
+            commands::tools::set_composer_repo,
             commands::tools::set_global_mysql,
             commands::tools::set_mysql_password,
             commands::tools::fix_mysql_path_conflicts,
@@ -167,6 +169,67 @@ fn main() {
                         format!("NaxOne 启动（扫到 {} 个服务）", svc_count),
                         None, None,
                     ).await;
+                });
+            }
+
+            // 启动迁移：给已经装好的 PHP 修 php.ini 的 extension_dir。
+            // 商店包 / 历史装的 PHP 默认 extension_dir 全注释，导致 openssl 等扩展加载失败 →
+            // composer create-project / php-cgi 跑站点都会受影响。幂等，已修复的 PHP 不再改。
+            {
+                let state = app.state::<AppState>();
+                let state_clone = state.inner().clone_shallow();
+                tauri::async_runtime::spawn(async move {
+                    use naxone_core::domain::service::ServiceKind;
+                    let services_snap = state_clone.services.read().await.clone();
+                    for svc in services_snap.iter().filter(|s| s.kind == ServiceKind::Php) {
+                        match naxone_adapters::package::post_install::ensure_php_ini_extension_dir(&svc.install_path) {
+                            Ok(true) => tracing::info!(install = %svc.install_path.display(), "PHP 启动迁移：php.ini extension_dir 已修复"),
+                            Ok(false) => {}
+                            Err(e) => tracing::warn!(install = %svc.install_path.display(), "PHP 启动迁移失败: {}", e),
+                        }
+                    }
+                });
+            }
+
+            // 启动迁移：从 vhosts.json 元数据 regenerate 缺失的 nginx/apache vhost .conf。
+            // 场景：用户卸载 nginx 重装，目录里 conf/vhosts/ 是空的；或者首次装商店 nginx
+            // 默认就没建 vhosts 子目录。幂等：已有的 .conf 不会被覆盖。
+            {
+                let state = app.state::<AppState>();
+                let state_clone = state.inner().clone_shallow();
+                tauri::async_runtime::spawn(async move {
+                    use naxone_core::domain::service::ServiceKind;
+                    let services = state_clone.services.read().await.clone();
+                    let nginx_install = services.iter().find(|s| s.kind == ServiceKind::Nginx).map(|s| s.install_path.clone());
+                    let apache_install = services.iter().find(|s| s.kind == ServiceKind::Apache).map(|s| s.install_path.clone());
+                    drop(services);
+
+                    let nginx_vhosts = nginx_install.as_ref().map(|d| d.join("conf").join("vhosts"));
+                    let apache_vhosts = apache_install.as_ref().map(|d| d.join("conf").join("vhosts"));
+                    if let Some(d) = &nginx_vhosts { let _ = std::fs::create_dir_all(d); }
+                    if let Some(d) = &apache_vhosts { let _ = std::fs::create_dir_all(d); }
+
+                    // 同步保证 nginx.conf 含 include vhosts/*.conf;
+                    if let Some(install) = &nginx_install {
+                        if let Err(e) = commands::vhost::ensure_nginx_vhosts_include(install) {
+                            tracing::warn!("启动迁移 ensure_nginx_vhosts_include 失败: {}", e);
+                        }
+                    }
+
+                    let vhosts = state_clone.vhosts.read().await.clone();
+                    let mut restored = 0usize;
+                    for v in &vhosts {
+                        if let Ok(true) = state_clone.vhost_manager.regenerate_configs(
+                            v,
+                            nginx_vhosts.as_deref(),
+                            apache_vhosts.as_deref(),
+                        ) {
+                            restored += 1;
+                        }
+                    }
+                    if restored > 0 {
+                        tracing::info!(restored, "启动迁移：从 vhosts.json 重生成 {} 个 vhost 配置文件", restored);
+                    }
                 });
             }
 

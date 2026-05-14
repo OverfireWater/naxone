@@ -109,6 +109,7 @@ let svcTimer: number | null = null;
 let logTimer: number | null = null;
 let uptimeTimer: number | null = null;
 let unlistenServicesChanged: UnlistenFn | null = null;
+let unlistenGlobalEnvChanged: UnlistenFn | null = null;
 let pauseUntil = 0;
 const INVOKE_TIMEOUT_MS = 10000;
 const bgErrorAt = new Map<string, number>();
@@ -533,6 +534,12 @@ onMounted(async () => {
     loadGlobalPhp();
     loadDevTools();
   });
+  // GlobalEnv 页面切换全局 PHP/Composer/Node/MySQL/镜像后会发该事件 → 刷新仪表板的环境概览
+  // （Dashboard 被 KeepAlive 缓存，路由切回时不会重新 onMounted，必须靠事件同步）
+  unlistenGlobalEnvChanged = await listen("global-env-changed", () => {
+    loadGlobalPhp();
+    loadDevTools();
+  });
   // 轮询从 3s 放宽到 5s（后端已做 status 缓存 + 快速返回 + 后台并行刷新）
   svcTimer = window.setInterval(() => {
     loadServices();
@@ -547,6 +554,7 @@ onUnmounted(() => {
   if (logTimer) clearInterval(logTimer);
   if (uptimeTimer) clearInterval(uptimeTimer);
   if (unlistenServicesChanged) unlistenServicesChanged();
+  if (unlistenGlobalEnvChanged) unlistenGlobalEnvChanged();
 });
 </script>
 

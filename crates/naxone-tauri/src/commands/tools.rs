@@ -139,10 +139,10 @@ async fn do_set_global_composer(version: &str, state: &AppState) -> Result<DevTo
     std::fs::create_dir_all(&bin_dir)
         .map_err(|e| format!("创建 bin 目录失败: {}", e))?;
 
-    let php_shim = bin_dir.join("php.cmd");
+    // composer shim 调 PATH 里的 php，不写死任何 php 路径 —— 切换 PHP / 不用 NaxOne 全局
+    // PHP（直接用系统/PHPStudy 的 php）时 composer 都能正常工作。
     let content = format!(
-        "@echo off\r\n\"{}\" \"{}\" %*\r\n",
-        php_shim.display(),
+        "@echo off\r\nphp \"{}\" %*\r\n",
         phar_path.display()
     );
     std::fs::write(bin_dir.join("composer.bat"), content.as_bytes())
@@ -197,6 +197,145 @@ fn build_composer_info(packages_root: &Path) -> Option<ComposerToolInfo> {
 
     let active_version = detect_active_composer(&available);
     Some(ComposerToolInfo { active_version, available })
+}
+
+/// 读当前 composer 全局 repo.packagist 配置。空串表示官方源（未配置或 default）。
+/// 直接读 `%APPDATA%/Composer/config.json`，避免 `composer config` 命令对数组形式
+/// repositories 字段处理不一致的问题。
+#[tauri::command]
+pub async fn get_composer_repo(_state: State<'_, AppState>) -> Result<String, String> {
+    let Some(path) = composer_config_path() else {
+        return Ok(String::new());
+    };
+    if !path.is_file() {
+        return Ok(String::new());
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Ok(String::new()),
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Ok(String::new()),
+    };
+    Ok(extract_packagist_url(&json).unwrap_or_default())
+}
+
+/// 设置 composer 镜像源。url 为空 → 清掉自定义 repo 回到 Packagist 官方源。
+#[tauri::command]
+pub async fn set_composer_repo(
+    url: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let label = if url.is_empty() {
+        "重置 Composer 镜像源为官方".to_string()
+    } else {
+        format!("设置 Composer 镜像源 → {}", url)
+    };
+    let result = do_set_composer_repo(&url, &state).await;
+    logged(&state, "tool", label, result).await
+}
+
+async fn do_set_composer_repo(url: &str, _state: &AppState) -> Result<String, String> {
+    let path = composer_config_path()
+        .ok_or_else(|| "无法定位 %APPDATA%/Composer 目录".to_string())?;
+
+    // 读现有 config.json；不存在或解析失败 → 视为空配置
+    let mut json: serde_json::Value = if path.is_file() {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("读 config.json 失败: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // 清掉两种可能的 packagist 配置：repo.packagist (config 节) + repositories.packagist (顶层)
+    if let Some(config) = json.get_mut("config") {
+        if let Some(obj) = config.as_object_mut() {
+            obj.remove("repo");
+        }
+    }
+    if let Some(repos) = json.get_mut("repositories") {
+        // 数组形式：移除 name=packagist 的项
+        if let Some(arr) = repos.as_array_mut() {
+            arr.retain(|r| r.get("name").and_then(|n| n.as_str()) != Some("packagist"));
+        }
+        // 对象形式：移除 packagist key
+        if let Some(obj) = repos.as_object_mut() {
+            obj.remove("packagist");
+        }
+    }
+
+    if !url.is_empty() {
+        // 用对象形式写入（composer 官方推荐写法）
+        let entry = serde_json::json!({ "type": "composer", "url": url });
+        // 复用现有 repositories 字段类型；不存在则用 object
+        match json.get_mut("repositories") {
+            Some(serde_json::Value::Array(arr)) => {
+                arr.push(serde_json::json!({
+                    "name": "packagist",
+                    "type": "composer",
+                    "url": url
+                }));
+            }
+            Some(serde_json::Value::Object(obj)) => {
+                obj.insert("packagist".into(), entry);
+            }
+            _ => {
+                let mut obj = serde_json::Map::new();
+                obj.insert("packagist".into(), entry);
+                json["repositories"] = serde_json::Value::Object(obj);
+            }
+        }
+    } else {
+        // 清空后若 repositories 变空，删掉整个字段避免遗留空数组/对象
+        let should_remove = match json.get("repositories") {
+            Some(serde_json::Value::Array(a)) => a.is_empty(),
+            Some(serde_json::Value::Object(o)) => o.is_empty(),
+            _ => false,
+        };
+        if should_remove {
+            if let Some(obj) = json.as_object_mut() {
+                obj.remove("repositories");
+            }
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let serialized = serde_json::to_string_pretty(&json)
+        .map_err(|e| format!("序列化 config.json 失败: {}", e))?;
+    std::fs::write(&path, serialized.as_bytes())
+        .map_err(|e| format!("写 config.json 失败: {}", e))?;
+    Ok(url.to_string())
+}
+
+fn composer_config_path() -> Option<PathBuf> {
+    let appdata = std::env::var("APPDATA").ok()?;
+    Some(PathBuf::from(appdata).join("Composer").join("config.json"))
+}
+
+/// 从 config.json 提取 packagist 镜像的 URL（数组或对象形式都支持）。
+fn extract_packagist_url(json: &serde_json::Value) -> Option<String> {
+    let repos = json.get("repositories")?;
+    if let Some(arr) = repos.as_array() {
+        for r in arr {
+            if r.get("name").and_then(|n| n.as_str()) == Some("packagist") {
+                if let Some(url) = r.get("url").and_then(|u| u.as_str()) {
+                    return Some(url.to_string());
+                }
+            }
+        }
+    }
+    if let Some(obj) = repos.as_object() {
+        if let Some(p) = obj.get("packagist") {
+            if let Some(url) = p.get("url").and_then(|u| u.as_str()) {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn detect_active_composer(available: &[ComposerOption]) -> Option<String> {

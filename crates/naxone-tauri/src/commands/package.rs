@@ -302,8 +302,13 @@ pub async fn get_installed_packages(
     out.extend(scan_tools(&packages_root));
 
     // 系统/用户已装的工具（仅 composer / nvm）。NaxOne 自己装的会被 detect 模块排除。
+    // 用户「解除关联」过的工具记在 config.ignored_system_tools，这里跳过 —— UI 上不再显示。
     use naxone_adapters::package::tool_detect;
+    let ignored = state.config.read().await.general.ignored_system_tools.clone();
     for detected in tool_detect::detect_all(&packages_root) {
+        if ignored.iter().any(|n| n.eq_ignore_ascii_case(&detected.name)) {
+            continue;
+        }
         out.push(InstalledPackage {
             name: detected.name,
             version: detected.version,
@@ -563,7 +568,34 @@ async fn rescan_services_inner(
         let mut vhosts = state.vhosts.write().await;
         *vhosts = merged;
     }
+
+    // 装完 nginx/apache 后，conf/vhosts/ 是空的，从 vhosts.json 元数据自动重写所有
+    // 缺失的 .conf。让用户卸载 → 重装的流程能自动恢复站点。
+    regen_missing_vhost_configs(state).await;
+
     Ok(())
+}
+
+async fn regen_missing_vhost_configs(state: &std::sync::Arc<AppState>) {
+    use naxone_core::domain::service::ServiceKind;
+    let services = state.services.read().await.clone();
+    let nginx_install = services.iter().find(|s| s.kind == ServiceKind::Nginx).map(|s| s.install_path.clone());
+    let apache_install = services.iter().find(|s| s.kind == ServiceKind::Apache).map(|s| s.install_path.clone());
+    drop(services);
+
+    let nginx_vhosts = nginx_install.as_ref().map(|d| d.join("conf").join("vhosts"));
+    let apache_vhosts = apache_install.as_ref().map(|d| d.join("conf").join("vhosts"));
+    if let Some(d) = &nginx_vhosts { let _ = std::fs::create_dir_all(d); }
+    if let Some(d) = &apache_vhosts { let _ = std::fs::create_dir_all(d); }
+
+    let vhosts = state.vhosts.read().await.clone();
+    for v in &vhosts {
+        let _ = state.vhost_manager.regenerate_configs(
+            v,
+            nginx_vhosts.as_deref(),
+            apache_vhosts.as_deref(),
+        );
+    }
 }
 
 #[tauri::command]
@@ -687,7 +719,8 @@ pub async fn uninstall_package(
 }
 
 /// 「解除关联」系统已装的 composer/nvm：仅清 PATH / 环境变量，不删任何文件。
-/// 用于卡片标 source="system" 的工具，UI 上是「解除关联」按钮。
+/// 解除关联：让 NaxOne 不再把系统/用户级安装的工具当作"已安装"，但**不动**用户实际的
+/// 系统 PATH / 文件，避免影响 IDE 等其他依赖。仅在 config.ignored_system_tools 加一条。
 #[tauri::command]
 pub async fn unlink_system_tool(
     name: String,
@@ -702,30 +735,35 @@ pub async fn unlink_system_tool(
     drop(config);
     let detected = naxone_adapters::package::tool_detect::detect(&name, &packages_root)
         .ok_or_else(|| format!("未检测到系统已装的 {}", name))?;
-    let install_path = std::path::PathBuf::from(&detected.install_path);
-    let report = naxone_adapters::package::post_install::unlink(&name, &install_path);
 
-    let level = if report.errors.is_empty() {
-        LogLevel::Success
-    } else {
-        LogLevel::Warn
-    };
+    // 写入 ignored 列表（去重 + 持久化）
+    {
+        let mut config = state.config.write().await;
+        if !config.general.ignored_system_tools.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+            config.general.ignored_system_tools.push(name.clone());
+        }
+        let cfg_path = crate::state::config_path();
+        let _ = config.save(&cfg_path);
+    }
+
     push_log(
         &state,
-        level,
+        LogLevel::Success,
         "store",
         format!("已解除与 {} v{} 的关联", name, detected.version),
         Some(format!(
-            "清 {} 项环境/PATH，错误 {} 条",
-            report.cleared.len(),
-            report.errors.len()
+            "原安装位置不变：{}\nNaxOne 仅在视野内屏蔽该工具，不修改系统 PATH / 文件。",
+            detected.install_path
         )),
         None,
     )
     .await;
 
     let _ = app.emit("services-changed", ());
-    Ok(report)
+    Ok(naxone_adapters::package::post_install::UnlinkReport {
+        cleared: vec![format!("已加入忽略列表（不再显示）")],
+        errors: Vec::new(),
+    })
 }
 
 /// 「彻底卸载」系统已装的 composer/nvm：删核心本体文件 + 清环境变量。

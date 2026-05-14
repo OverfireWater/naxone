@@ -151,15 +151,15 @@ pub async fn init_site_template(
         SiteTemplate::Wordpress => init_wordpress(&app, &sink, &dir).await,
         SiteTemplate::Laravel => {
             emit_progress(&app, "running", None, None, None);
-            init_composer(&app, &sink, &dir, "laravel/laravel").await
+            init_composer(&app, &sink, &dir, "laravel/laravel", &state).await
         }
         SiteTemplate::Thinkphp => {
             emit_progress(&app, "running", None, None, None);
-            init_composer(&app, &sink, &dir, "topthink/think").await
+            init_composer(&app, &sink, &dir, "topthink/think", &state).await
         }
         SiteTemplate::Webman => {
             emit_progress(&app, "running", None, None, None);
-            init_composer(&app, &sink, &dir, "workerman/webman").await
+            init_composer(&app, &sink, &dir, "workerman/webman", &state).await
         }
     };
 
@@ -290,7 +290,13 @@ async fn init_wordpress(app: &AppHandle, sink: &Sink, dir: &Path) -> Result<(), 
     Ok(())
 }
 
-async fn init_composer(app: &AppHandle, sink: &Sink, dir: &Path, package: &str) -> Result<(), String> {
+async fn init_composer(
+    app: &AppHandle,
+    sink: &Sink,
+    dir: &Path,
+    package: &str,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
     // composer create-project 自己也校验目录必须空 —— NaxOne create_vhost 写过的
     // nginx.htaccess / .htaccess 会让它拒绝。临时把这俩文件备份起来，跑完再放回。
     let htaccess_names = ["nginx.htaccess", ".htaccess"];
@@ -305,7 +311,7 @@ async fn init_composer(app: &AppHandle, sink: &Sink, dir: &Path, package: &str) 
         }
     }
 
-    let result = run_composer_inner(app, sink, dir, package).await;
+    let result = run_composer_inner(app, sink, dir, package, state).await;
 
     // 还原 htaccess（不管 composer 成功或失败都要恢复，否则下次启动 nginx reload 会找不到 htaccess 报 emerg）
     for (p, content) in backups {
@@ -322,17 +328,52 @@ async fn run_composer_inner(
     sink: &Sink,
     dir: &Path,
     package: &str,
+    state: &State<'_, AppState>,
 ) -> Result<(), String> {
+    // 关键：必须用 NaxOne 内置 PHP + composer.phar，绕开 PATH。
+    // 否则用户机器上的 C:\ProgramData\ComposerSetup / C:\php 会被 PATH 优先匹中，
+    // 而那些往往缺 openssl 等扩展，composer create-project 会直接挂掉。
+    let php = resolve_naxone_php(state).await
+        .ok_or_else(|| "未找到可用的 PHP（请先在「软件商店」安装 PHP）".to_string())?;
+    let phar = resolve_naxone_composer_phar(state).await
+        .ok_or_else(|| "未找到 composer.phar（请先在「软件商店」安装 Composer）".to_string())?;
+
+    // 找一个跟 php.exe 同目录的 ini 文件，强制 -c 指定。
+    // 否则 PHP 会去注册表 / PHPRC / 系统 PATH 找 php.ini —— 用户机器装了独立 PHP
+    // 在 C:\php 时会命中那个的 php.ini（extension_dir 指向 C:\php\ext），扩展全报"找不到"。
+    let php_ini = find_php_ini(&php);
+    // 商店装的 PHP 包 php.ini 默认把 extension_dir 全注释了 → PHP fallback 到
+    // 编译时默认 (`C:\php\ext`)。这里用 -d 强制覆盖，指向 NaxOne PHP 自带的 ext/。
+    let ext_dir = php
+        .parent()
+        .map(|d| d.join("ext"))
+        .filter(|p| p.is_dir());
+
+    emit_log(app, sink, format!("PHP:      {}", php.display()));
+    if let Some(ref ini) = php_ini {
+        emit_log(app, sink, format!("php.ini:  {}", ini.display()));
+    } else {
+        emit_log(app, sink, "php.ini:  (未找到，使用 PHP 默认查找)".to_string());
+    }
+    if let Some(ref e) = ext_dir {
+        emit_log(app, sink, format!("ext_dir:  {}", e.display()));
+    }
+    emit_log(app, sink, format!("Composer: {}", phar.display()));
     emit_log(
         app,
         sink,
         format!("执行: composer create-project {} . --no-interaction", package),
     );
 
-    let mut cmd = TokioCommand::new("cmd.exe");
-    cmd.current_dir(dir)
-        .arg("/C")
-        .arg("composer")
+    let mut cmd = TokioCommand::new(&php);
+    cmd.current_dir(dir);
+    if let Some(ref ini) = php_ini {
+        cmd.arg("-c").arg(ini);
+    }
+    if let Some(ref e) = ext_dir {
+        cmd.arg("-d").arg(format!("extension_dir={}", e.display()));
+    }
+    cmd.arg(&phar)
         .arg("create-project")
         .arg(package)
         .arg(".")
@@ -343,7 +384,7 @@ async fn run_composer_inner(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("启动 composer 失败（PATH 中可能没有 composer）: {}", e))?;
+        .map_err(|e| format!("启动 composer 失败: {}", e))?;
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
 
@@ -380,9 +421,63 @@ async fn run_composer_inner(
 
     if !status.success() {
         return Err(format!(
-            "composer create-project 失败 (exit {})\n请确认「全局环境」已配置 composer 且 PHP 在 PATH 中可用",
+            "composer create-project 失败 (exit {})",
             status
         ));
     }
     Ok(())
+}
+
+/// 拿一个可用的 PHP 可执行文件，**绕开系统 PATH**。
+/// 优先级：services 里第一个 PHP 实例 → ~/.naxone/bin/php.cmd（用户设过全局）。
+/// 都没有返回 None。
+async fn resolve_naxone_php(state: &State<'_, AppState>) -> Option<PathBuf> {
+    use naxone_core::domain::service::ServiceKind;
+    let services = state.services.read().await;
+    if let Some(svc) = services.iter().find(|s| s.kind == ServiceKind::Php) {
+        let exe = svc.install_path.join("php.exe");
+        if exe.is_file() {
+            return Some(exe);
+        }
+    }
+    drop(services);
+    let shim = naxone_adapters::platform::global_php::bin_dir().join("php.cmd");
+    if shim.is_file() {
+        return Some(shim);
+    }
+    None
+}
+
+/// 在 php.exe 同目录下找一个可用的 php.ini 文件。
+/// 优先 php.ini（用户/打包者已配置好的），其次 -production / -development 模板。
+fn find_php_ini(php_exe: &Path) -> Option<PathBuf> {
+    let dir = php_exe.parent()?;
+    for name in ["php.ini", "php.ini-production", "php.ini-development"] {
+        let p = dir.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// 拿 NaxOne 商店里装的 composer.phar 绝对路径。**不**调用 NaxOne 全局 shim
+/// （shim 内部会调 PATH 里的 php，那就又被系统 PATH 拦截了）。
+async fn resolve_naxone_composer_phar(state: &State<'_, AppState>) -> Option<PathBuf> {
+    let config = state.config.read().await;
+    let packages_root = crate::state::resolve_packages_root(&config);
+    drop(config);
+    let tools_dir = packages_root.join("tools");
+    let entries = std::fs::read_dir(&tools_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("composer-") {
+            continue;
+        }
+        let phar = entry.path().join("composer.phar");
+        if phar.is_file() {
+            return Some(phar);
+        }
+    }
+    None
 }
