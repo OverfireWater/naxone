@@ -416,12 +416,39 @@ impl VhostManager {
     /// 只重新生成 .conf 文件（nginx + apache），不写 hosts、不 reload。
     /// 用于 nginx/apache 重装后从 vhosts.json 元数据恢复站点配置。
     /// 已存在的 .conf 文件**不会**被覆盖（避免覆盖用户手动改过的）。
+    ///
+    /// 同时确保 nginx.htaccess / .htaccess 存在（若 rewrite_rule 非空且 document_root 存在）。
+    /// 否则 nginx -t 会因 `include xxx/nginx.htaccess` 引用不存在文件而报 emerg。
+    ///
+    /// 返回 Err 表示 vhost 数据本身坏掉（如 document_root 不存在），调用方应 skip。
     pub fn regenerate_configs(
         &self,
         vhost: &VirtualHost,
         nginx_vhosts_dir: Option<&Path>,
         apache_vhosts_dir: Option<&Path>,
     ) -> Result<bool> {
+        // document_root 不存在 → 跳过此 vhost。写 .conf 会引用不存在的 nginx.htaccess
+        // 导致 nginx -t 失败、所有 vhost 一起挂。让调用方决定（push warn 或自动清理）。
+        if !vhost.document_root.exists() {
+            return Err(NaxOneError::Config(format!(
+                "vhost {} 的站点目录不存在: {}",
+                vhost.id,
+                vhost.document_root.display()
+            )));
+        }
+
+        // 先确保 htaccess 文件存在（rewrite_rule 非空时）
+        if !vhost.rewrite_rule.is_empty() {
+            let nginx_htaccess = vhost.document_root.join("nginx.htaccess");
+            let apache_htaccess = vhost.document_root.join(".htaccess");
+            if !self.config_io.exists(&nginx_htaccess) {
+                self.config_io.write_text(&nginx_htaccess, &vhost.rewrite_rule)?;
+            }
+            if !self.config_io.exists(&apache_htaccess) {
+                self.config_io.write_text(&apache_htaccess, &vhost.rewrite_rule)?;
+            }
+        }
+
         let filename = vhost.config_filename();
         let mut wrote = false;
         if let Some(dir) = nginx_vhosts_dir {

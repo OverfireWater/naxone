@@ -218,17 +218,48 @@ fn main() {
 
                     let vhosts = state_clone.vhosts.read().await.clone();
                     let mut restored = 0usize;
+                    let mut broken: Vec<(String, String)> = Vec::new(); // (id, document_root)
                     for v in &vhosts {
-                        if let Ok(true) = state_clone.vhost_manager.regenerate_configs(
+                        match state_clone.vhost_manager.regenerate_configs(
                             v,
                             nginx_vhosts.as_deref(),
                             apache_vhosts.as_deref(),
                         ) {
-                            restored += 1;
+                            Ok(true) => restored += 1,
+                            Ok(false) => {}
+                            Err(e) => {
+                                // document_root 不存在 → 标记坏 vhost。同时清掉对应的旧 .conf
+                                // 避免 nginx -t 因引用不存在文件而启动失败。
+                                broken.push((v.id.clone(), v.document_root.display().to_string()));
+                                let filename = format!("{}_{}.conf", v.server_name, v.listen_port);
+                                if let Some(d) = &nginx_vhosts { let _ = std::fs::remove_file(d.join(&filename)); }
+                                if let Some(d) = &apache_vhosts { let _ = std::fs::remove_file(d.join(&filename)); }
+                                tracing::warn!(vhost = %v.id, "{}", e);
+                            }
                         }
                     }
                     if restored > 0 {
                         tracing::info!(restored, "启动迁移：从 vhosts.json 重生成 {} 个 vhost 配置文件", restored);
+                    }
+                    if !broken.is_empty() {
+                        use naxone_core::domain::log::LogLevel;
+                        let details = broken
+                            .iter()
+                            .map(|(id, root)| format!("• {} → {}", id, root))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        commands::logger::push_log(
+                            &state_clone,
+                            LogLevel::Warn,
+                            "vhost",
+                            format!("发现 {} 个站点的目录已不存在，对应 nginx 配置已暂时移除", broken.len()),
+                            Some(format!(
+                                "以下站点目录缺失，请到「网站」页面处理（删除或重新指定目录）:\n{}",
+                                details
+                            )),
+                            None,
+                        )
+                        .await;
                     }
                 });
             }
