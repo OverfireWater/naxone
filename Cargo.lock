@@ -2216,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "naxone-adapters"
-version = "0.5.17"
+version = "0.5.18"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2237,9 +2237,10 @@ dependencies = [
 
 [[package]]
 name = "naxone-core"
-version = "0.5.17"
+version = "0.5.18"
 dependencies = [
  "async-trait",
+ "futures-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2249,7 +2250,7 @@ dependencies = [
 
 [[package]]
 name = "naxone-tauri"
-version = "0.5.17"
+version = "0.5.18"
 dependencies = [
  "chrono",
  "futures-util",

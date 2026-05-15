@@ -363,14 +363,41 @@ fn php(install_dir: &Path) {
     }
 }
 
-/// 保证 `<install>/php.ini` 存在 + 含有非注释的 `extension_dir = "ext"` 行。
-/// 幂等：已经配置好的 PHP 不会被改动。返回 Ok(true) 表示有修改、Ok(false) 没修改。
+/// 默认启用的扩展白名单（Windows 包里都自带 dll，启用即用）。
+/// 选择标准：日常 web/CLI 开发刚需 + 跑得动 composer/laravel/thinkphp/wordpress。
+/// 排除：oci8（Oracle，包里没 dll）、snmp（MIB 缺失）、ldap（少用）、pdo_oci/firebird/dblib（少用）。
+const PHP_DEFAULT_EXTENSIONS: &[&str] = &[
+    "openssl",       // composer / HTTPS / 加密必需
+    "mbstring",      // 中文/多字节处理
+    "curl",          // HTTP 客户端
+    "mysqli",        // MySQL
+    "pdo_mysql",     // MySQL PDO
+    "pdo_sqlite",    // SQLite PDO（laravel 测试默认用）
+    "sqlite3",       // SQLite
+    "fileinfo",      // 文件类型识别（laravel 等需要）
+    "gd",            // 图片处理
+    "zip",           // composer / 压缩
+    "bz2",           // bzip2 压缩
+    "intl",          // 国际化（laravel 推荐）
+    "exif",          // 图片元数据
+    "sockets",       // socket 编程 / webman
+    "gettext",       // 国际化
+    "soap",          // SOAP 客户端
+    "xsl",           // XML/XSLT
+];
+
+/// 保证 `<install>/php.ini` 存在 + 含有非注释的 `extension_dir = "ext"` 行
+/// + 默认启用一组常用扩展（PHP_DEFAULT_EXTENSIONS）。
+/// 幂等：已经配置好的 PHP 不会被改动；单个扩展已启用则跳过。
+/// 返回 Ok(true) 表示有修改、Ok(false) 没修改。
 ///
-/// 启动时遍历 services 的 PHP install_path 调用一次，把历史装的 PHP 也修好。
+/// 装 PHP 后立即调一次（post_install），启动时再遍历 services 的 PHP install_path 兜底调一次，
+/// 把历史装的 PHP 也补好。
 pub fn ensure_php_ini_extension_dir(install_dir: &Path) -> Result<bool, String> {
     let ini_path = install_dir.join("php.ini");
 
     // 1. php.ini 不存在 → 拿 production / development 模板复制一份
+    let mut created_from_template = false;
     if !ini_path.is_file() {
         let template = ["php.ini-production", "php.ini-development"]
             .iter()
@@ -381,6 +408,7 @@ pub fn ensure_php_ini_extension_dir(install_dir: &Path) -> Result<bool, String> 
                 std::fs::copy(&src, &ini_path).map_err(|e| {
                     format!("复制 {} → php.ini 失败: {}", src.display(), e)
                 })?;
+                created_from_template = true;
             }
             None => {
                 // 没 php.ini 也没模板：不是标准 PHP 包，跳过
@@ -389,10 +417,12 @@ pub fn ensure_php_ini_extension_dir(install_dir: &Path) -> Result<bool, String> 
         }
     }
 
-    // 2. 读取 ini，检查是否已有生效的 extension_dir
-    let content = std::fs::read_to_string(&ini_path)
+    let original = std::fs::read_to_string(&ini_path)
         .map_err(|e| format!("读 php.ini 失败: {}", e))?;
-    let has_active = content.lines().any(|line| {
+    let mut content = original.clone();
+
+    // 2. 确保有非注释的 extension_dir
+    let has_ext_dir = content.lines().any(|line| {
         let t = line.trim_start();
         !t.starts_with(';')
             && !t.starts_with('#')
@@ -400,47 +430,118 @@ pub fn ensure_php_ini_extension_dir(install_dir: &Path) -> Result<bool, String> 
                 .map(|(k, _)| k.trim().eq_ignore_ascii_case("extension_dir"))
                 .unwrap_or(false)
     });
-    if has_active {
+    if !has_ext_dir {
+        content = enable_extension_dir(&content);
+    }
+
+    // 3. 启用 PHP_DEFAULT_EXTENSIONS 中每个扩展（已启用的跳过）
+    for ext in PHP_DEFAULT_EXTENSIONS {
+        // 只启用 ext/ 下实际存在的 dll，避免开了不存在的扩展报警告
+        let dll = install_dir.join("ext").join(format!("php_{}.dll", ext));
+        if !dll.is_file() {
+            continue;
+        }
+        content = enable_extension(&content, ext);
+    }
+
+    if content == original && !created_from_template {
         return Ok(false);
     }
 
-    // 3. 没生效的 extension_dir → 把第一处 `;extension_dir = "ext"` 解注释
+    // 4. 备份原文件 + 写入
+    let bak = ini_path.with_extension("ini.bak");
+    let _ = std::fs::write(&bak, original.as_bytes());
+    std::fs::write(&ini_path, content.as_bytes())
+        .map_err(|e| format!("写 php.ini 失败: {}", e))?;
+    tracing::info!(install = %install_dir.display(), "PHP php.ini 已应用 NaxOne 默认配置（extension_dir + 常用扩展）");
+    Ok(true)
+}
+
+/// 把 ini 中 `;extension_dir = "ext"` 注释行解开。若找不到这种行，在末尾追加。
+fn enable_extension_dir(content: &str) -> String {
     let mut replaced = false;
-    let new_content: String = content
+    let lines: Vec<String> = content
         .lines()
         .map(|line| {
             if !replaced {
                 let t = line.trim_start();
-                if t.starts_with(';') {
-                    let stripped = t.trim_start_matches(';').trim_start();
+                if let Some(stripped) = t.strip_prefix(';') {
+                    let stripped = stripped.trim_start();
                     if let Some((k, v)) = stripped.split_once('=') {
-                        if k.trim().eq_ignore_ascii_case("extension_dir") && v.contains("\"ext\"") {
+                        if k.trim().eq_ignore_ascii_case("extension_dir")
+                            && v.contains("\"ext\"")
+                        {
                             replaced = true;
-                            return format!("extension_dir = \"ext\"");
+                            return r#"extension_dir = "ext""#.to_string();
                         }
                     }
                 }
             }
             line.to_string()
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // 4. 模板里 `;extension_dir = "ext"` 没找到（异常情况） → 追加一行兜底
-    let final_content = if replaced {
-        new_content
+        .collect();
+    let joined = lines.join("\n");
+    if replaced {
+        joined
     } else {
         let sep = if content.ends_with('\n') { "" } else { "\n" };
         format!("{}{}extension_dir = \"ext\"\n", content, sep)
-    };
+    }
+}
 
-    // 5. 备份原文件
-    let bak = ini_path.with_extension("ini.bak");
-    let _ = std::fs::write(&bak, content.as_bytes());
-    std::fs::write(&ini_path, final_content.as_bytes())
-        .map_err(|e| format!("写 php.ini 失败: {}", e))?;
-    tracing::info!(install = %install_dir.display(), "已启用 PHP extension_dir = ext");
-    Ok(true)
+/// 启用单个扩展：把 `;extension=<name>` 解注释。已经非注释的 extension=<name> 跳过。
+/// 若 ini 里完全没这一行，在末尾追加 `extension=<name>`。
+fn enable_extension(content: &str, ext_name: &str) -> String {
+    // 检查是否已有生效（非注释）的 extension=name 或 extension="name"
+    let already_active = content.lines().any(|line| {
+        let t = line.trim_start();
+        if t.starts_with(';') || t.starts_with('#') {
+            return false;
+        }
+        let Some((k, v)) = t.split_once('=') else { return false; };
+        if !k.trim().eq_ignore_ascii_case("extension") {
+            return false;
+        }
+        let val = v.trim().trim_matches('"').trim_matches('\'');
+        val.eq_ignore_ascii_case(ext_name) || val.eq_ignore_ascii_case(&format!("php_{}.dll", ext_name))
+    });
+    if already_active {
+        return content.to_string();
+    }
+
+    // 找 `;extension=<name>` 解注释（命中第一处即可）
+    let mut replaced = false;
+    let lines: Vec<String> = content
+        .lines()
+        .map(|line| {
+            if !replaced {
+                let t = line.trim_start();
+                if let Some(stripped) = t.strip_prefix(';') {
+                    let stripped = stripped.trim_start();
+                    if let Some((k, v)) = stripped.split_once('=') {
+                        if k.trim().eq_ignore_ascii_case("extension") {
+                            let val = v.trim().trim_matches('"').trim_matches('\'');
+                            if val.eq_ignore_ascii_case(ext_name)
+                                || val.eq_ignore_ascii_case(&format!("php_{}.dll", ext_name))
+                            {
+                                replaced = true;
+                                return format!("extension={}", ext_name);
+                            }
+                        }
+                    }
+                }
+            }
+            line.to_string()
+        })
+        .collect();
+    let joined = lines.join("\n");
+    if replaced {
+        joined
+    } else {
+        // ini 里没这行 → 末尾追加
+        let sep = if content.ends_with('\n') { "" } else { "\n" };
+        format!("{}{}extension={}\n", content, sep, ext_name)
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

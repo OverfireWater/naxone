@@ -158,7 +158,20 @@ const phpInstances = ref<PhpInstance[]>([]);
 const selectedPhp = ref<PhpInstance | null>(null);
 const phpExts = ref<PhpExtension[]>([]);
 const phpIni = ref<PhpIniSettings | null>(null);
-const phpSubTab = ref<"extensions" | "settings">("extensions");
+const phpSubTab = ref<"extensions" | "settings" | "phpinfo">("extensions");
+
+// phpinfo
+const phpinfoText = ref<string>("");
+const phpinfoLoading = ref(false);
+const phpinfoSearch = ref("");
+const phpinfoFiltered = computed(() => {
+  const q = phpinfoSearch.value.trim().toLowerCase();
+  if (!q) return phpinfoText.value;
+  return phpinfoText.value
+    .split(/\r?\n/)
+    .filter((line) => line.toLowerCase().includes(q))
+    .join("\n");
+});
 
 async function loadPhpInstances() {
   try {
@@ -184,8 +197,26 @@ async function savePhpIni() {
   busy.value = true;
   try { await invoke("save_php_ini_settings", { installPath: selectedPhp.value.install_path, settings: phpIni.value }); showSaved(); } catch (e) { showError("保存失败: " + e); } finally { busy.value = false; }
 }
+async function loadPhpInfo() {
+  if (!selectedPhp.value || phpinfoLoading.value) return;
+  phpinfoLoading.value = true;
+  phpinfoText.value = "";
+  try {
+    phpinfoText.value = await invoke<string>("get_phpinfo", { installPath: selectedPhp.value.install_path });
+  } catch (e) {
+    phpinfoText.value = `加载 phpinfo 失败：${e}`;
+  } finally { phpinfoLoading.value = false; }
+}
+function switchPhpSubTab(t: typeof phpSubTab.value) {
+  phpSubTab.value = t;
+  if (t === "phpinfo" && !phpinfoText.value) loadPhpInfo();
+}
 
-watch(selectedPhp, () => { loadPhpExts(); loadPhpIni(); });
+watch(selectedPhp, () => {
+  loadPhpExts();
+  loadPhpIni();
+  phpinfoText.value = ""; // 切换实例后清缓存，下次进 phpinfo tab 才重新拉
+});
 
 // ─── PIE 扩展安装 ───────────────────────────────────
 interface PieExtensionInfo { name: string; description: string }
@@ -532,10 +563,10 @@ onMounted(() => {
         <SelectMenu v-if="phpInstances.length > 0" :model-value="selectedPhp?.id ?? null" :options="phpInstanceOptions" trigger-class="input w-[240px] shrink-0" @update:modelValue="selectPhpInstance($event)" />
         <div class="flex gap-1 shrink-0">
           <button
-            v-for="st in ([{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'}] as const)" :key="st.k"
+            v-for="st in ([{k:'extensions',l:'扩展管理'},{k:'settings',l:'php.ini 配置'},{k:'phpinfo',l:'phpinfo'}] as const)" :key="st.k"
             class="px-4 py-1.5 rounded-md text-[16px] cursor-pointer transition-all border"
             :class="phpSubTab === st.k ? 'bg-accent-blue text-white border-accent-blue' : 'bg-surface-primary text-content-muted border-border hover:text-content-secondary'"
-            @click="phpSubTab = st.k"
+            @click="switchPhpSubTab(st.k)"
           >{{ st.l }}</button>
         </div>
       </div>
@@ -606,6 +637,31 @@ onMounted(() => {
           <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">严格模式 <span class="k">session.use_strict_mode</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_use_strict_mode" /><span class="toggle-slider"></span></label></div>
           <div class="fg-toggle"><span class="text-[13px] font-medium" style="color:var(--text-secondary)">Cookie HttpOnly <span class="k">session.cookie_httponly</span></span><label class="toggle-wrap"><input type="checkbox" v-model="phpIni.session_cookie_httponly" /><span class="toggle-slider"></span></label></div>
         </div>
+      </div>
+
+      <!-- phpinfo -->
+      <div v-if="phpSubTab === 'phpinfo'">
+        <div class="flex items-center gap-2 mb-3">
+          <input
+            class="input flex-1"
+            v-model="phpinfoSearch"
+            placeholder="搜索 phpinfo（按行过滤，如 openssl / mysqli / date.timezone）"
+          />
+          <button class="btn btn-secondary btn-sm" :disabled="phpinfoLoading" @click="loadPhpInfo">
+            {{ phpinfoLoading ? '加载中...' : '刷新' }}
+          </button>
+        </div>
+        <div class="text-[12px] mb-2" style="color: var(--text-muted)">
+          源：<code>{{ selectedPhp?.install_path || '' }}\php.exe -i</code>
+          <span v-if="phpinfoSearch.trim()" class="ml-2">·
+            匹配 {{ phpinfoFiltered.split('\n').length }} 行 /
+            共 {{ phpinfoText.split('\n').length }} 行
+          </span>
+        </div>
+        <pre
+          class="font-mono text-[12px] leading-[1.5] p-3 rounded-md overflow-auto"
+          style="background: var(--bg-tertiary); color: var(--text-primary); max-height: 70vh; white-space: pre-wrap; word-break: break-all"
+        >{{ phpinfoLoading ? '正在跑 php -i ...' : (phpinfoFiltered || '（没有匹配的行）') }}</pre>
       </div>
     </div>
 

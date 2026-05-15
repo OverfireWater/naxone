@@ -22,7 +22,8 @@ impl PlatformOps for LinuxPlatform {
     }
 
     fn data_dir(&self) -> PathBuf {
+        // dev / prod 后缀复用通用 helper（dirs 模块 cfg!(debug_assertions) 决定）
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
-        PathBuf::from(home).join(".naxone")
+        PathBuf::from(home).join(crate::platform::dirs::naxone_home_dirname())
     }
 }

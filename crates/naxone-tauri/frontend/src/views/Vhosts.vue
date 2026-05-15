@@ -87,6 +87,19 @@ interface TemplateProgress {
 }
 const templateProgress = ref<TemplateProgress | null>(null);
 const templateElapsed = ref<number>(0);
+// 失败 / 重试 / 换镜像 state
+const templateFailed = ref(false);
+const templateLastTarget = ref("");
+const templateLastTpl = ref("");
+// 镜像列表：跟「全局环境」composer 镜像下拉保持一致。value 用 URL，空串 = 官方。
+const templateMirrorOptions = [
+  { label: "Packagist 官方", value: "" },
+  { label: "腾讯云", value: "https://mirrors.cloud.tencent.com/composer/" },
+  { label: "华为云", value: "https://mirrors.huaweicloud.com/repository/php/" },
+  { label: "阿里云", value: "https://mirrors.aliyun.com/composer/" },
+];
+const templateMirrorPick = ref<string>(""); // 当前下拉选中的 URL（响应式）
+const templateCancelBusy = ref(false);
 let templateTimer: ReturnType<typeof setInterval> | null = null;
 
 function phaseLabel(p: TemplateProgress | null, busy: boolean): string {
@@ -350,10 +363,63 @@ function copyTemplateLogs() {
   showFloat("日志已复制");
 }
 
+/// 停止当前装包：调后端 taskkill 杀子进程树
+async function cancelTemplate() {
+  if (templateCancelBusy.value) return;
+  templateCancelBusy.value = true;
+  try {
+    const killed = await invoke<boolean>("cancel_init_site_template");
+    if (killed) {
+      templateLogs.value.push("⏹ 用户主动停止");
+      toast.info("已停止装包");
+    } else {
+      toast.info("没有正在运行的装包任务");
+    }
+  } catch (e) {
+    showError(`停止失败: ${e}`);
+  } finally {
+    templateCancelBusy.value = false;
+  }
+}
+
+/// 重试：清空日志重新跑相同的 target + template
+async function retryTemplate() {
+  if (templateBusy.value || !templateLastTarget.value || !templateLastTpl.value) return;
+  await runTemplateInit(templateLastTarget.value, templateLastTpl.value);
+}
+
+/// 用户从下拉选了镜像 → 切换 + 自动重试
+async function onMirrorPicked(value: string | number | boolean | null) {
+  if (templateBusy.value) return;
+  const url = typeof value === "string" ? value : "";
+  const opt = templateMirrorOptions.find((m) => m.value === url);
+  const label = opt?.label || url || "(未知)";
+  try {
+    await invoke("set_composer_repo", { url });
+    templateLogs.value.push(`🔄 镜像源已切到「${label}」${url ? ` (${url})` : ""}，重试中...`);
+    toast.success(`镜像源 → ${label}`);
+    await retryTemplate();
+  } catch (e) {
+    showError(`切换镜像源失败: ${e}`);
+  }
+}
+
+/// 失败时把当前镜像同步到下拉，方便用户看到当前值再选别的
+async function syncCurrentMirror() {
+  try {
+    templateMirrorPick.value = await invoke<string>("get_composer_repo");
+  } catch {
+    templateMirrorPick.value = "";
+  }
+}
+
 async function runTemplateInit(targetDir: string, template: string): Promise<boolean> {
   showTemplateModal.value = true;
   templateLogs.value = [];
   templateBusy.value = true;
+  templateFailed.value = false;
+  templateLastTarget.value = targetDir;
+  templateLastTpl.value = template;
   templateProgress.value = null;
   templateElapsed.value = 0;
   const start = Date.now();
@@ -387,6 +453,8 @@ async function runTemplateInit(targetDir: string, template: string): Promise<boo
   } catch (e) {
     const msg = String(e);
     templateLogs.value.push(`✗ ${msg}`);
+    templateFailed.value = true; // 标记失败 → modal 显示 重试/换镜像 按钮
+    syncCurrentMirror(); // 同步下拉显示当前镜像，方便用户选别的
     if (msg.includes("目录非空")) {
       showError(`模板初始化失败：${targetDir} 已有内容。请先清空该目录或换个新目录再创建。`);
     } else if (!showTemplateModal.value) {
@@ -664,8 +732,30 @@ onUnmounted(() => {
     <div v-if="showTemplateModal" class="modal-overlay" @click.self="showTemplateModal = false">
       <div class="modal-content" style="width: 720px">
         <div class="flex items-center justify-between mb-2">
-          <div class="text-base font-semibold">{{ templateBusy ? '正在初始化站点…' : '初始化完成' }}</div>
-          <div class="flex gap-2">
+          <div class="text-base font-semibold">
+            {{ templateBusy ? '正在初始化站点…' : (templateFailed ? '初始化失败' : '初始化完成') }}
+          </div>
+          <div class="flex gap-2 flex-wrap justify-end">
+            <!-- 运行中：停止 -->
+            <button v-if="templateBusy"
+                    class="btn btn-danger btn-sm"
+                    :disabled="templateCancelBusy"
+                    @click="cancelTemplate">
+              {{ templateCancelBusy ? '停止中...' : '⏹ 停止' }}
+            </button>
+            <!-- 失败后：换镜像（下拉手动选） + 重试 -->
+            <template v-if="!templateBusy && templateFailed">
+              <SelectMenu
+                :model-value="templateMirrorPick"
+                :options="templateMirrorOptions"
+                trigger-class="btn btn-secondary btn-sm"
+                placeholder="🔄 换镜像源"
+                @update:modelValue="onMirrorPicked"
+              />
+              <button class="btn btn-primary btn-sm" @click="retryTemplate" title="用当前镜像重试">
+                🔁 重试
+              </button>
+            </template>
             <button class="btn btn-secondary btn-sm" :disabled="!templateLogs.length" @click="copyTemplateLogs">复制日志</button>
             <button class="btn btn-secondary btn-sm" @click="showTemplateModal = false">{{ templateBusy ? '后台运行' : '关闭' }}</button>
           </div>

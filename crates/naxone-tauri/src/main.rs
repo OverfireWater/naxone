@@ -63,6 +63,7 @@ fn main() {
             commands::php::toggle_php_extension,
             commands::php::get_php_ini_settings,
             commands::php::save_php_ini_settings,
+            commands::php::get_phpinfo,
             commands::php::get_global_php_version,
             commands::php::set_global_php_version,
             commands::php::fix_global_php_conflicts,
@@ -123,6 +124,7 @@ fn main() {
             commands::vhost::read_vhost_conf,
             commands::vhost::write_vhost_conf,
             commands::template::init_site_template,
+            commands::template::cancel_init_site_template,
         ])
         .setup(|app| {
             // Dev 模式窗口标题加标识

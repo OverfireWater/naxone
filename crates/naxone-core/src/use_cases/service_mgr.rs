@@ -128,15 +128,41 @@ impl ServiceManager {
 
         // 仅 Nginx 模式需要连带启 PHP-CGI 常驻：fastcgi_pass 必须有进程在 9000+ 监听。
         // Apache 用 mod_fcgid，自己按需 fork php-cgi 子进程，无需主动启动。
+        //
+        // 优化：5 个 PHP 串行启动 = 5 × 500ms（每个 start 的固定 sleep 兜底）= 2.5s 阻塞，
+        // 改用 futures::join 并行 spawn。各 PHP 用独立端口互不影响。
         if target.kind == ServiceKind::Nginx {
-            for svc in all_services.iter_mut() {
-                if svc.kind == ServiceKind::Php && !svc.status.is_running() {
-                    self.start_service(svc).await.map_err(|e| {
-                        NaxOneError::Process(format!(
-                            "联动启动 PHP-CGI {} 失败: {}",
-                            svc.version, e
-                        ))
-                    })?;
+            let php_indices: Vec<usize> = all_services
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.kind == ServiceKind::Php && !s.status.is_running())
+                .map(|(i, _)| i)
+                .collect();
+
+            if !php_indices.is_empty() {
+                let futures = php_indices.iter().map(|&i| {
+                    let svc = &all_services[i];
+                    let pm = self.process_mgr.clone();
+                    async move {
+                        let mut local = svc.clone();
+                        let res = pm.start(&local).await.map(|pid| {
+                            local.status = crate::domain::service::ServiceStatus::Running { pid, memory_mb: None };
+                            local
+                        });
+                        (i, res)
+                    }
+                });
+                let results = futures_util::future::join_all(futures).await;
+                for (idx, res) in results {
+                    match res {
+                        Ok(updated) => all_services[idx].status = updated.status,
+                        Err(e) => {
+                            return Err(NaxOneError::Process(format!(
+                                "联动启动 PHP-CGI {} 失败: {}",
+                                all_services[idx].version, e
+                            )));
+                        }
+                    }
                 }
             }
         }
@@ -155,15 +181,37 @@ impl ServiceManager {
     ) -> Result<()> {
         self.stop_service(target).await?;
 
+        // 停 nginx 后并行停所有 PHP-CGI（无依赖关系，5 个串行 stop 太慢）。
         if target.kind == ServiceKind::Nginx {
-            for svc in all_services.iter_mut() {
-                if svc.kind == ServiceKind::Php && svc.status.is_running() {
-                    if let Err(e) = self.stop_service(svc).await {
-                        tracing::warn!(
-                            version = %svc.version,
-                            error = %e,
-                            "联动停止 PHP-CGI 失败，继续",
-                        );
+            let php_indices: Vec<usize> = all_services
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.kind == ServiceKind::Php && s.status.is_running())
+                .map(|(i, _)| i)
+                .collect();
+
+            if !php_indices.is_empty() {
+                let futures = php_indices.iter().map(|&i| {
+                    let svc = all_services[i].clone();
+                    let pm = self.process_mgr.clone();
+                    async move {
+                        let res = pm.stop(&svc).await;
+                        (i, svc.version.clone(), res)
+                    }
+                });
+                let results = futures_util::future::join_all(futures).await;
+                for (idx, version, res) in results {
+                    match res {
+                        Ok(_) => {
+                            all_services[idx].status = crate::domain::service::ServiceStatus::Stopped;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                version = %version,
+                                error = %e,
+                                "联动停止 PHP-CGI 失败，继续",
+                            );
+                        }
                     }
                 }
             }

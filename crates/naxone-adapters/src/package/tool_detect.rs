@@ -55,10 +55,25 @@ pub fn detect_all(packages_root: &Path) -> Vec<DetectedTool> {
 #[cfg(target_os = "windows")]
 fn detect_composer(packages_root: &Path) -> Option<DetectedTool> {
     let naxone_tools = packages_root.join("tools");
+    // NaxOne 自己写的全局 shim 目录（~/.naxone/bin/composer.bat），不该认成"系统已装"
+    let naxone_bin = Some(crate::platform::dirs::naxone_bin_dir());
 
     let candidates = which_all("composer");
     for cand in &candidates {
         if cand.starts_with(&naxone_tools) {
+            continue;
+        }
+        // 排除 NaxOne 自己的全局 shim —— 它只是个转发到当前 active composer.phar 的 .bat
+        if let Some(ref bin) = naxone_bin {
+            if cand.starts_with(bin) {
+                continue;
+            }
+        }
+        // 排除 cargo target/debug | target/release 下的 NaxOne 残留（用户在同一台机器跑过
+        // dev 模式 NaxOne 装包后，PATH 里会写 target/debug/Extensions/tools/composer-...
+        // 正式版 packages_root 不同，但仍应识别为"NaxOne 自身资源"而非用户的系统安装）
+        let s = cand.to_string_lossy().replace('/', "\\").to_lowercase();
+        if s.contains("\\target\\debug\\extensions\\") || s.contains("\\target\\release\\extensions\\") {
             continue;
         }
 
@@ -97,8 +112,7 @@ fn detect_composer(packages_root: &Path) -> Option<DetectedTool> {
 
 #[cfg(target_os = "windows")]
 fn try_phar_with_naxone_php(phar: &Path) -> Option<String> {
-    let home = std::env::var("USERPROFILE").ok()?;
-    let php_cmd = PathBuf::from(home).join(".naxone").join("bin").join("php.cmd");
+    let php_cmd = crate::platform::dirs::naxone_bin_dir().join("php.cmd");
     if !php_cmd.is_file() {
         return None;
     }

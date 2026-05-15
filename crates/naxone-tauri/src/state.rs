@@ -39,6 +39,9 @@ pub struct AppState {
     pub refresh_in_flight: Arc<AtomicBool>,
     /// 平台相关操作（hosts 文件、防火墙），命令层也要直接用
     pub platform_ops: Arc<dyn PlatformOps>,
+    /// 当前正在跑的模板装包子进程 PID（如 composer create-project）。
+    /// 前端 cancel_init_site_template 时读 PID 杀进程树（taskkill /F /T）。
+    pub template_child_pid: Arc<tokio::sync::Mutex<Option<u32>>>,
 }
 
 impl AppState {
@@ -58,6 +61,7 @@ impl AppState {
             log_writer_tx: self.log_writer_tx.clone(),
             refresh_in_flight: self.refresh_in_flight.clone(),
             platform_ops: self.platform_ops.clone(),
+            template_child_pid: self.template_child_pid.clone(),
         }
     }
 
@@ -170,6 +174,7 @@ impl AppState {
             log_writer_tx: Arc::new(tokio::sync::Mutex::new(None)),
             refresh_in_flight: Arc::new(AtomicBool::new(false)),
             platform_ops,
+            template_child_pid: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 }
@@ -314,8 +319,9 @@ fn legacy_default_www_root() -> PathBuf {
 
 /// dev 和 prod 共享同一个数据目录，允许两边同时启动。
 /// 代价：双开同时写配置文件会竞态（实战几乎不会撞，因为写入是低频用户操作）。
-pub const fn naxone_home_dirname() -> &'static str { ".naxone" }
-pub const fn naxone_appdata_dirname() -> &'static str { "NaxOne" }
+/// dev 与 prod 用不同后缀彻底隔离用户态数据（PATH 条目、~/.naxone/、%APPDATA%/NaxOne/）。
+/// 见 `naxone_adapters::platform::dirs` 模块说明。
+pub use naxone_adapters::platform::dirs::{naxone_appdata_dirname, naxone_home_dirname};
 
 pub fn vhosts_json_path() -> PathBuf {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
@@ -346,6 +352,10 @@ fn default_config() -> AppConfig {
 /// - `%APPDATA%\RustStudy\` → `%APPDATA%\NaxOne\`（packages 安装树）。
 /// 只在目标目录不存在时执行，幂等；失败不影响主流程。
 fn migrate_legacy_ruststudy_data() {
+    // dev 不迁移：dev 数据本来就独立在 ~/.naxone-dev/，跟历史 RustStudy 数据无关
+    if cfg!(debug_assertions) {
+        return;
+    }
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
     let home = PathBuf::from(home);
 

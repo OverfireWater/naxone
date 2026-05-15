@@ -11,3 +11,5 @@ pub mod global_php;
 pub mod user_env;
 
 pub mod ssl_cert;
+
+pub mod dirs;

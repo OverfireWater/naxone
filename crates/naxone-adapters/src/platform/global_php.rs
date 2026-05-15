@@ -21,10 +21,9 @@ const SHIMS: &[(&str, &str)] = &[
     ("phpize.bat", "phpize.cmd"),
 ];
 
-/// `%USERPROFILE%\.naxone\bin`
+/// `%USERPROFILE%\.naxone\bin`（dev 时为 `.naxone-dev/bin`）
 pub fn bin_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-    PathBuf::from(home).join(".naxone").join("bin")
+    crate::platform::dirs::naxone_bin_dir()
 }
 
 /// 为 php_install_path 下的可执行文件生成 .cmd 包装器到 bin_dir。

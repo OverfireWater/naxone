@@ -338,26 +338,50 @@ impl WindowsProcessManager {
 #[async_trait]
 impl ProcessManager for WindowsProcessManager {
     async fn start(&self, instance: &ServiceInstance) -> Result<u32> {
+        let t_total = std::time::Instant::now();
         // 端口预检：PHP 可多端口共存不查；其余 kind 端口被外部进程占着的话直接 bail，
         // 避免 redis/nginx/mysqld 因 bind 失败 exit 1，把"端口冲突"伪装成"启动失败 exit code 1"。
+        //
+        // 优化：先用 TcpListener::bind 试探（毫秒级），端口可用时**完全跳过 netstat**（netstat
+        // 子进程在系统连接数多时常常 200-2000ms，是启动慢的主要源头）。
+        // bind 失败时再回退到 netstat 找占用方 PID 给详细错误信息（慢路径只在端口真冲突时走）。
+        let _t_precheck = std::time::Instant::now();
         if instance.kind != ServiceKind::Php {
-            let snap = self.snapshot_listening_ports().await;
-            if let Some(&existing_pid) = snap.get(&instance.port) {
-                if existing_pid != 0 && !pid_matches_instance(existing_pid, instance).await {
-                    let exe = get_process_exe_path(existing_pid)
-                        .await
-                        .unwrap_or_else(|| "未知进程".to_string());
-                    return Err(NaxOneError::Process(format!(
-                        "{} 启动失败：端口 {} 已被外部进程占用 (PID {}, {})。请先在仪表板结束外部进程后重试。",
-                        instance.kind.display_name(),
-                        instance.port,
-                        existing_pid,
-                        exe,
-                    )));
+            use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+            let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, instance.port));
+            let bind_ok = TcpListener::bind(addr).map(|l| drop(l)).is_ok();
+            if !bind_ok {
+                let snap = self.snapshot_listening_ports().await;
+                if let Some(&existing_pid) = snap.get(&instance.port) {
+                    if existing_pid != 0 && !pid_matches_instance(existing_pid, instance).await {
+                        let exe = get_process_exe_path(existing_pid)
+                            .await
+                            .unwrap_or_else(|| "未知进程".to_string());
+                        return Err(NaxOneError::Process(format!(
+                            "{} 启动失败：端口 {} 已被外部进程占用 (PID {}, {})。请先在仪表板结束外部进程后重试。",
+                            instance.kind.display_name(),
+                            instance.port,
+                            existing_pid,
+                            exe,
+                        )));
+                    }
                 }
+                // bind 失败但 netstat 找不到对应 PID（罕见）→ 兜底报通用错
+                return Err(NaxOneError::Process(format!(
+                    "{} 启动失败：端口 {} 被占用，但定位不到具体进程。请到仪表板「陌生进程」查看。",
+                    instance.kind.display_name(),
+                    instance.port,
+                )));
             }
         }
 
+        tracing::debug!(
+            service = instance.kind.display_name(),
+            precheck_ms = _t_precheck.elapsed().as_millis() as u64,
+            "start: 端口预检完成"
+        );
+
+        let t_spawn = std::time::Instant::now();
         let mut cmd = Self::build_start_command(instance)?;
         cmd.no_window();
 
@@ -375,9 +399,16 @@ impl ProcessManager for WindowsProcessManager {
             })?;
 
         let pid = child.id().unwrap_or(0);
+        tracing::debug!(
+            service = instance.kind.display_name(),
+            pid,
+            spawn_ms = t_spawn.elapsed().as_millis() as u64,
+            "start: spawn 完成"
+        );
 
         // For short-lived processes (Nginx/Apache may exit quickly on config error),
-        // wait briefly and check if process is still alive
+        // wait briefly and check if process is still alive。500ms 是固定兜底，配置错误时
+        // 进程会在这段时间内退出（nginx 进程通常 < 100ms 自检完）。
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // Check if process exited immediately (config error etc.)
@@ -435,16 +466,17 @@ impl ProcessManager for WindowsProcessManager {
         // 主动失效 status 缓存，下次 status() 重新探测得到 Running
         self.invalidate_status(&instance.id()).await;
 
-        tracing::info!(
-            service = instance.kind.display_name(),
-            pid = pid,
-            "Service started"
-        );
-
         // PHP auto-restart watchdog: if php-cgi.exe dies, respawn it automatically
         if instance.kind == ServiceKind::Php {
             self.spawn_watchdog(instance).await;
         }
+
+        tracing::info!(
+            service = instance.kind.display_name(),
+            pid,
+            total_ms = t_total.elapsed().as_millis() as u64,
+            "Service started"
+        );
 
         Ok(pid)
     }

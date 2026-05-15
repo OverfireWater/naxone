@@ -164,8 +164,7 @@ impl PlatformOps for WindowsPlatform {
     }
 
     fn data_dir(&self) -> PathBuf {
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".into());
-        PathBuf::from(home).join(".naxone")
+        crate::platform::dirs::naxone_home_dir()
     }
 
     fn add_firewall_port(&self, port: u16) -> Result<()> {

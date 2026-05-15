@@ -113,34 +113,27 @@ pub fn normalize_path(s: &str) -> String {
 
 /// 广播 WM_SETTINGCHANGE 到所有顶层窗口，让新 shell 重读环境变量。
 /// 已开的 cmd 窗口 OS 限制改不了，必须用户重开。
+///
+/// 用 `SendNotifyMessageW`（fire-and-forget）而非 `SendMessageTimeoutW`：
+/// 后者会**串行等每个顶层窗口响应**（即便带 SMTO_ABORTIFHUNG，正常窗口响应累加也容易
+/// 卡几秒），常见场景是机器开了浏览器 / IDE / 各种工具栏，切全局 PHP 要等好几秒才返回。
+/// SendNotifyMessage 立即返回，对接收方异步投递消息 —— 任何关心 PATH 的进程仍会收到
+/// WM_SETTINGCHANGE 并重读环境变量，对用户体验没差别。
 pub fn broadcast_env_change() {
     #[link(name = "user32")]
     unsafe extern "system" {
-        fn SendMessageTimeoutW(
+        fn SendNotifyMessageW(
             hwnd: isize,
             msg: u32,
             wparam: usize,
             lparam: *const u16,
-            flags: u32,
-            timeout: u32,
-            result: *mut usize,
-        ) -> isize;
+        ) -> i32;
     }
     const HWND_BROADCAST: isize = 0xffff;
     const WM_SETTINGCHANGE: u32 = 0x001A;
-    const SMTO_ABORTIFHUNG: u32 = 0x0002;
     let msg: Vec<u16> = "Environment\0".encode_utf16().collect();
-    let mut result: usize = 0;
     unsafe {
-        SendMessageTimeoutW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0,
-            msg.as_ptr(),
-            SMTO_ABORTIFHUNG,
-            3000,
-            &mut result,
-        );
+        SendNotifyMessageW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, msg.as_ptr());
     }
 }
 

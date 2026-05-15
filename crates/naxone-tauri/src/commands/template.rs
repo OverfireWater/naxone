@@ -385,6 +385,11 @@ async fn run_composer_inner(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("启动 composer 失败: {}", e))?;
+    // 把 PID 注册到 state，让 cancel_init_site_template 能找到并 taskkill
+    if let Some(pid) = child.id() {
+        *state.template_child_pid.lock().await = Some(pid);
+        emit_log(app, sink, format!("composer 子进程 PID={}", pid));
+    }
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
 
@@ -418,8 +423,12 @@ async fn run_composer_inner(
         .map_err(|e| format!("等待 composer 失败: {}", e))?;
     let _ = stdout_task.await;
     let _ = stderr_task.await;
+    // 清掉 PID 标记
+    *state.template_child_pid.lock().await = None;
 
     if !status.success() {
+        // 用 status.code() 判断是否被外部杀掉（taskkill /F 通常 exit code = 1 但来源不可考）。
+        // 简单：信任用户操作，stderr 日志里会有 cancel 痕迹。
         return Err(format!(
             "composer create-project 失败 (exit {})",
             status
@@ -428,22 +437,78 @@ async fn run_composer_inner(
     Ok(())
 }
 
+/// 杀掉当前正在跑的模板装包子进程及其进程树。
+/// 用 `taskkill /F /T /PID` 递归杀（composer 会拉 git/npm 等子进程，单杀 PID 不够）。
+#[tauri::command]
+pub async fn cancel_init_site_template(state: State<'_, AppState>) -> Result<bool, String> {
+    let pid = match *state.template_child_pid.lock().await {
+        Some(pid) => pid,
+        None => return Ok(false), // 没在跑
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("taskkill 失败: {}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            // PID 已不存在的话 taskkill 也会报错，视为 OK
+            if !stderr.contains("not found") && !stderr.contains("找不到") {
+                return Err(format!("taskkill 拒绝: {}", stderr.trim()));
+            }
+        }
+    }
+
+    *state.template_child_pid.lock().await = None;
+    push_log(
+        &state,
+        LogLevel::Warn,
+        "site-template",
+        format!("用户中止模板装包 (PID={})", pid),
+        None,
+        None,
+    )
+    .await;
+    Ok(true)
+}
+
 /// 拿一个可用的 PHP 可执行文件，**绕开系统 PATH**。
-/// 优先级：services 里第一个 PHP 实例 → ~/.naxone/bin/php.cmd（用户设过全局）。
-/// 都没有返回 None。
+/// 优先级：
+/// 1. 用户在「全局环境」设置的 `config.global_php_version` 对应的 PHP（首选）
+/// 2. services 里第一个 PHP 实例（兜底）
+/// 用真实 install_path/php.exe 而不是 shim —— 否则 find_php_ini / extension_dir 找的是
+/// shim 同目录（~/.naxone/bin/），里面没有 php.ini / ext。
 async fn resolve_naxone_php(state: &State<'_, AppState>) -> Option<PathBuf> {
     use naxone_core::domain::service::ServiceKind;
+
+    let global_ver = state.config.read().await.general.global_php_version.clone();
     let services = state.services.read().await;
+
+    // 1. 优先：用户设置的全局 PHP 版本
+    if let Some(ver) = global_ver {
+        if let Some(svc) = services
+            .iter()
+            .find(|s| s.kind == ServiceKind::Php && s.version == ver)
+        {
+            let exe = svc.install_path.join("php.exe");
+            if exe.is_file() {
+                return Some(exe);
+            }
+        }
+    }
+
+    // 2. fallback：services 第一个 PHP（用户没设全局时）
     if let Some(svc) = services.iter().find(|s| s.kind == ServiceKind::Php) {
         let exe = svc.install_path.join("php.exe");
         if exe.is_file() {
             return Some(exe);
         }
-    }
-    drop(services);
-    let shim = naxone_adapters::platform::global_php::bin_dir().join("php.cmd");
-    if shim.is_file() {
-        return Some(shim);
     }
     None
 }
